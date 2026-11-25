@@ -1,0 +1,233 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isPrimaryOwner() {
+      return isVerifiedUser() && request.auth.token.email == 'pedrocamargo486@gmail.com';
+    }
+
+    function isAdmin() {
+      return isPrimaryOwner() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidGender(g) {
+      return g in ['masculino', 'feminino', 'infantil', 'unissex'];
+    }
+
+    function isValidType(t) {
+      return t in ['corrida', 'academia', 'casual', 'dia_a_dia', 'trabalho', 'ocasioes_especiais'];
+    }
+
+    function isValidShippingMode(m) {
+      return m in ['confirm_store', 'fixed_rate', 'external_api'];
+    }
+
+    function isValidStringList(arr, maxLen) {
+      return arr is list && arr.size() <= maxLen && (arr.size() == 0 || arr[0] is string);
+    }
+
+    // --- Validation Blueprints ---
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+        'name', 'slug', 'brandId', 'brandName', 'description', 'details',
+        'price', 'promoPrice', 'isPromo', 'isFeatured', 'isNewRelease',
+        'outOfStock', 'active', 'gender', 'type', 'occasion',
+        'colors', 'images', 'sizes', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'name', 'slug', 'brandId', 'brandName', 'description', 'details',
+        'price', 'promoPrice', 'isPromo', 'isFeatured', 'isNewRelease',
+        'outOfStock', 'active', 'gender', 'type', 'occasion',
+        'colors', 'images', 'sizes', 'createdAt', 'updatedAt'
+      ]) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+      data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 140 &&
+      data.brandId is string && data.brandId.size() >= 1 && data.brandId.size() <= 64 && isValidId(data.brandId) &&
+      data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 64 &&
+      data.description is string && data.description.size() <= 2000 &&
+      data.details is string && data.details.size() <= 1000 &&
+      data.price is number && data.price >= 0 && data.price <= 100000 &&
+      data.promoPrice is number && data.promoPrice >= 0 && data.promoPrice <= 100000 &&
+      data.isPromo is bool &&
+      data.isFeatured is bool &&
+      data.isNewRelease is bool &&
+      data.outOfStock is bool &&
+      data.active is bool &&
+      data.gender is string && data.gender.size() <= 32 && isValidGender(data.gender) &&
+      data.type is string && data.type.size() <= 40 && isValidType(data.type) &&
+      data.occasion is string && data.occasion.size() <= 80 &&
+      isValidStringList(data.colors, 12) &&
+      isValidStringList(data.images, 8) &&
+      data.sizes is map && data.sizes.keys().size() <= 25 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidBrand(data) {
+      return data.keys().hasAll(['name', 'slug', 'logoUrl', 'order', 'active', 'createdAt', 'updatedAt']) &&
+      data.keys().hasOnly(['name', 'slug', 'logoUrl', 'order', 'active', 'createdAt', 'updatedAt']) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 64 &&
+      data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 64 &&
+      data.logoUrl is string && data.logoUrl.size() <= 500 &&
+      data.order is number && data.order >= 0 && data.order <= 9999 &&
+      data.active is bool &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidStoreConfig(data) {
+      return data.keys().hasAll([
+        'storeName', 'heroTitle', 'heroSubtitle', 'heroCtaText', 'heroImageUrl',
+        'whatsappNumber', 'storeAddress', 'openingHours', 'pickupInfo', 'pickupFree',
+        'shippingMode', 'fixedShippingPrice', 'fixedShippingDays', 'shippingApiEndpoint',
+        'instagramUrl', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'storeName', 'heroTitle', 'heroSubtitle', 'heroCtaText', 'heroImageUrl',
+        'whatsappNumber', 'storeAddress', 'openingHours', 'pickupInfo', 'pickupFree',
+        'shippingMode', 'fixedShippingPrice', 'fixedShippingDays', 'shippingApiEndpoint',
+        'instagramUrl', 'updatedAt'
+      ]) &&
+      data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 80 &&
+      data.heroTitle is string && data.heroTitle.size() >= 1 && data.heroTitle.size() <= 140 &&
+      data.heroSubtitle is string && data.heroSubtitle.size() <= 240 &&
+      data.heroCtaText is string && data.heroCtaText.size() >= 1 && data.heroCtaText.size() <= 50 &&
+      data.heroImageUrl is string && data.heroImageUrl.size() <= 500 &&
+      data.whatsappNumber is string && data.whatsappNumber.size() <= 20 &&
+      data.storeAddress is string && data.storeAddress.size() <= 300 &&
+      data.openingHours is string && data.openingHours.size() <= 200 &&
+      data.pickupInfo is string && data.pickupInfo.size() <= 400 &&
+      data.pickupFree is bool &&
+      data.shippingMode is string && data.shippingMode.size() <= 32 && isValidShippingMode(data.shippingMode) &&
+      data.fixedShippingPrice is number && data.fixedShippingPrice >= 0 && data.fixedShippingPrice <= 10000 &&
+      data.fixedShippingDays is string && data.fixedShippingDays.size() <= 60 &&
+      data.shippingApiEndpoint is string && data.shippingApiEndpoint.size() <= 300 &&
+      data.instagramUrl is string && data.instagramUrl.size() <= 200 &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+      data.keys().hasOnly(['email', 'role', 'createdAt']) &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+      data.role is string && data.role == 'admin' &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidMediaAsset(data) {
+      return data.keys().hasAll(['mimeType', 'base64Data', 'uploadedBy', 'createdAt']) &&
+      data.keys().hasOnly(['mimeType', 'base64Data', 'uploadedBy', 'createdAt']) &&
+      data.mimeType is string && data.mimeType in ['image/webp', 'image/jpeg', 'image/png'] &&
+      data.base64Data is string && data.base64Data.size() >= 1 && data.base64Data.size() <= 350000 &&
+      data.uploadedBy is string && data.uploadedBy == request.auth.uid && data.uploadedBy.size() <= 128 &&
+      data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // Connection health check document
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Public catalog products (Admin-only writes; cost-safe list rules without exists/get)
+    match /products/{productId} {
+      allow get: if isValidId(productId) && (existing().active == true || isAdmin());
+      allow list: if resource.data.active == true || isPrimaryOwner();
+      allow create: if isAdmin() && isValidId(productId) && isValidProduct(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(productId) && isValidProduct(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'slug', 'brandId', 'brandName', 'description', 'details',
+          'price', 'promoPrice', 'isPromo', 'isFeatured', 'isNewRelease',
+          'outOfStock', 'active', 'gender', 'type', 'occasion',
+          'colors', 'images', 'sizes', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // Footwear brands (Admin-only writes; cost-safe list rules without exists/get)
+    match /brands/{brandId} {
+      allow get: if isValidId(brandId) && (existing().active == true || isAdmin());
+      allow list: if resource.data.active == true || isPrimaryOwner();
+      allow create: if isAdmin() && isValidId(brandId) && isValidBrand(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(brandId) && isValidBrand(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'slug', 'logoUrl', 'order', 'active', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(brandId);
+    }
+
+    // Storefront configuration (public single-doc read, admin-only write)
+    match /storeConfig/{configId} {
+      allow get: if isValidId(configId) && configId == 'main';
+      allow create: if isAdmin() && isValidId(configId) && configId == 'main' &&
+        isValidStoreConfig(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(configId) && configId == 'main' &&
+        isValidStoreConfig(incoming()) && incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'storeName', 'heroTitle', 'heroSubtitle', 'heroCtaText', 'heroImageUrl',
+          'whatsappNumber', 'storeAddress', 'openingHours', 'pickupInfo', 'pickupFree',
+          'shippingMode', 'fixedShippingPrice', 'fixedShippingDays', 'shippingApiEndpoint',
+          'instagramUrl', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Admin allowlist (strictly primary owner managed)
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isPrimaryOwner() || (isVerifiedUser() && request.auth.uid == adminUid));
+      allow list: if isPrimaryOwner();
+      allow create: if isPrimaryOwner() && isValidId(adminUid) && isValidAdminUser(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if isPrimaryOwner() && isValidId(adminUid) && isValidAdminUser(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role']);
+      allow delete: if isPrimaryOwner() && isValidId(adminUid);
+    }
+
+    // Admin-uploaded compressed media assets (direct get by ID only)
+    match /media/{mediaId} {
+      allow get: if isValidId(mediaId);
+      allow create: if isAdmin() && isValidId(mediaId) && isValidMediaAsset(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(mediaId);
+    }
+  }
+}

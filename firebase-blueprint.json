@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Sneaker catalog item with configurable sizes, stock counts, pricing, and categorization.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "slug": { "type": "string", "minLength": 1, "maxLength": 140, "pattern": "^[a-z0-9-]+$" },
+        "brandId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "brandName": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "price": { "type": "number" },
+        "promoPrice": { "type": "number" },
+        "isPromo": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" },
+        "isNewRelease": { "type": "boolean" },
+        "outOfStock": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "gender": { "type": "string", "enum": ["masculino", "feminino", "infantil", "unissex"] },
+        "type": { "type": "string", "enum": ["corrida", "academia", "casual", "dia_a_dia", "trabalho", "ocasioes_especiais"] },
+        "occasion": { "type": "string", "maxLength": 80 },
+        "colors": { "type": "array" },
+        "images": { "type": "array" },
+        "sizes": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "name",
+        "slug",
+        "brandId",
+        "brandName",
+        "description",
+        "details",
+        "price",
+        "promoPrice",
+        "isPromo",
+        "isFeatured",
+        "isNewRelease",
+        "outOfStock",
+        "active",
+        "gender",
+        "type",
+        "occasion",
+        "colors",
+        "images",
+        "sizes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Brand": {
+      "title": "Brand",
+      "description": "Footwear brand displayed in the brand selector and product filters.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "slug": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$" },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "order": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "logoUrl", "order", "active", "createdAt", "updatedAt"]
+    },
+    "StoreConfig": {
+      "title": "StoreConfig",
+      "description": "Storefront configuration including hero banner, WhatsApp number, pickup address, and shipping settings.",
+      "type": "object",
+      "properties": {
+        "storeName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "heroTitle": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "heroSubtitle": { "type": "string", "maxLength": 240 },
+        "heroCtaText": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "heroImageUrl": { "type": "string", "maxLength": 500 },
+        "whatsappNumber": { "type": "string", "maxLength": 20 },
+        "storeAddress": { "type": "string", "maxLength": 300 },
+        "openingHours": { "type": "string", "maxLength": 200 },
+        "pickupInfo": { "type": "string", "maxLength": 400 },
+        "pickupFree": { "type": "boolean" },
+        "shippingMode": { "type": "string", "enum": ["confirm_store", "fixed_rate", "external_api"] },
+        "fixedShippingPrice": { "type": "number" },
+        "fixedShippingDays": { "type": "string", "maxLength": 60 },
+        "shippingApiEndpoint": { "type": "string", "maxLength": 300 },
+        "instagramUrl": { "type": "string", "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "storeName",
+        "heroTitle",
+        "heroSubtitle",
+        "heroCtaText",
+        "heroImageUrl",
+        "whatsappNumber",
+        "storeAddress",
+        "openingHours",
+        "pickupInfo",
+        "pickupFree",
+        "shippingMode",
+        "fixedShippingPrice",
+        "fixedShippingDays",
+        "shippingApiEndpoint",
+        "instagramUrl",
+        "updatedAt"
+      ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized store administrator record.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt"]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Admin-uploaded compressed product or brand image asset.",
+      "type": "object",
+      "properties": {
+        "mimeType": { "type": "string", "enum": ["image/webp", "image/jpeg", "image/png"] },
+        "base64Data": { "type": "string", "minLength": 1, "maxLength": 350000 },
+        "uploadedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["mimeType", "base64Data", "uploadedBy", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Public sneaker catalog items managed strictly by verified admins."
+    },
+    "/brands/{brandId}": {
+      "schema": { "$ref": "#/entities/Brand" },
+      "description": "Footwear brands displayed in the storefront brand carousel and filters."
+    },
+    "/storeConfig/{configId}": {
+      "schema": { "$ref": "#/entities/StoreConfig" },
+      "description": "Storefront configuration document (main) managed strictly by admins."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Explicitly authorized admin UIDs managed by the primary owner."
+    },
+    "/media/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Admin-uploaded compressed media assets."
+    }
+  }
+}

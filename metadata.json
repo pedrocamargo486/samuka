@@ -1,0 +1,6 @@
+{
+  "name": "SAMUKA TÊNIS — CATÁLOGO OFICIAL",
+  "description": "Catálogo virtual de tênis multimarcas da Samuka Tênis. Explore marcas, selecione sua numeração e finalize seu pedido pelo WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
