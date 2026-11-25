@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
-  lookupSneakerWithGemini,
+  lookupSneakerSmart,
   verifyFirebaseBearerToken,
 } from '../server/sneakerLookup';
 
@@ -27,7 +27,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       res.status(400).json({ error: 'Informe entre 2 e 120 caracteres para pesquisar o tênis.' });
       return;
     }
-    const result = await lookupSneakerWithGemini(query);
+    const result = await lookupSneakerSmart(query);
     res.status(200).json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao pesquisar tênis.';

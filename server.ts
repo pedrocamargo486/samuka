@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createServer as createViteServer } from 'vite';
 import {
   fetchSafeRemoteImage,
-  lookupSneakerWithGemini,
+  lookupSneakerSmart,
   verifyFirebaseBearerToken,
 } from './server/sneakerLookup';
 
@@ -20,7 +20,7 @@ async function startServer() {
         res.status(400).json({ error: 'Informe entre 2 e 120 caracteres para pesquisar o tênis.' });
         return;
       }
-      const result = await lookupSneakerWithGemini(query);
+      const result = await lookupSneakerSmart(query);
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao pesquisar tênis.';

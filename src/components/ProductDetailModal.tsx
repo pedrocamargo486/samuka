@@ -1,13 +1,30 @@
-import { useEffect, useState } from 'react';
-import { ArrowRight, Check, ChevronLeft, Heart, ShoppingBag, X } from 'lucide-react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import {
+  ArrowRight,
+  Box,
+  Check,
+  ChevronLeft,
+  Copy,
+  Heart,
+  Image as ImageIcon,
+  MessageCircle,
+  Share2,
+  ShoppingBag,
+  X,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { GENDER_LABELS, SNEAKER_TYPE_LABELS } from '../lib/seedData';
-import { formatBRL } from '../lib/utils';
+import { buildProductShareUrl, formatBRL, shareSneaker } from '../lib/utils';
 import type { Product } from '../types';
 import { SmartImage } from './SmartImage';
 
+const Sneaker3DViewer = lazy(() =>
+  import('./Sneaker3DViewer').then((m) => ({ default: m.Sneaker3DViewer }))
+);
+
 interface ProductDetailModalProps {
   product: Product | null;
+  storeName?: string;
   isFavorite: boolean;
   cartCount: number;
   onClose: () => void;
@@ -20,6 +37,7 @@ const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
 export function ProductDetailModal({
   product,
+  storeName = 'SAMUKA TÊNIS',
   isFavorite,
   cartCount,
   onClose,
@@ -27,21 +45,35 @@ export function ProductDetailModal({
   onAddToCart,
   onOpenCart,
 }: ProductDetailModalProps) {
+  const [viewMode, setViewMode] = useState<'photos' | '3d'>('photos');
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
   const [sizeError, setSizeError] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<'idle' | 'copied' | 'panel'>('idle');
+  const [shareUrl, setShareUrl] = useState('');
+  const [whatsappShareUrl, setWhatsappShareUrl] = useState('');
 
   useEffect(() => {
     if (product) {
+      setViewMode('photos');
       setSelectedImageIdx(0);
       setSelectedSize('');
       setSelectedColor(product.colors?.[0] || '');
       setSizeError(false);
       setJustAdded(false);
+      setShareFeedback('idle');
+      const url = buildProductShareUrl(product);
+      setShareUrl(url);
+      const hasPromo =
+        product.isPromo && product.promoPrice > 0 && product.promoPrice < product.price;
+      const effective = hasPromo ? product.promoPrice : product.price;
+      const priceLabel = effective > 0 ? ` por ${formatBRL(effective)}` : '';
+      const text = `Confira ${product.name} (${product.brandName})${priceLabel} na ${storeName}: ${url}`;
+      setWhatsappShareUrl(`https://wa.me/?text=${encodeURIComponent(text)}`);
     }
-  }, [product]);
+  }, [product, storeName]);
 
   useEffect(() => {
     if (!product) return;
@@ -76,6 +108,32 @@ export function ProductDetailModal({
     setJustAdded(true);
   };
 
+  const handleShareClick = async () => {
+    if (!product) return;
+    const res = await shareSneaker(product, storeName);
+    setShareUrl(res.url);
+    setWhatsappShareUrl(res.whatsappShareUrl);
+    if (res.outcome === 'copied') {
+      setShareFeedback('copied');
+      setTimeout(() => setShareFeedback('panel'), 2000);
+    } else if (res.outcome === 'manual') {
+      setShareFeedback('panel');
+    } else if (res.outcome === 'shared') {
+      setShareFeedback('panel');
+    }
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!shareUrl || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareFeedback('copied');
+      setTimeout(() => setShareFeedback('panel'), 2000);
+    } catch {
+      // Ignore clipboard permission failure
+    }
+  };
+
   return (
     <AnimatePresence>
       {product && (
@@ -102,7 +160,7 @@ export function ProductDetailModal({
               onClick={(e) => e.stopPropagation()}
             >
               {/* Top Modal Header */}
-              <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-stone-200 px-4 sm:px-6 h-14 flex items-center justify-between">
+              <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-stone-200 px-4 sm:px-6 h-14 flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={onClose}
@@ -112,6 +170,15 @@ export function ProductDetailModal({
                   <span>Voltar ao catálogo</span>
                 </button>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleShareClick()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-stone-300 hover:border-[#111111] text-[11px] font-bold uppercase tracking-wider text-[#111111] cursor-pointer"
+                    aria-label="Compartilhar este tênis"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Compartilhar</span>
+                  </button>
                   {cartCount > 0 && (
                     <button
                       type="button"
@@ -137,38 +204,94 @@ export function ProductDetailModal({
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12">
-                {/* Left Column: Image Gallery */}
+                {/* Left Column: Image Gallery OR Free Interactive 3D Viewer */}
                 <div className="lg:col-span-7 p-4 sm:p-6 lg:p-8 bg-[#FAFAFA] border-b lg:border-b-0 lg:border-r border-stone-200">
-                  <div className="aspect-[4/3] w-full bg-[#F5F5F4] overflow-hidden mb-3">
-                    <SmartImage
-                      src={images[selectedImageIdx] || images[0]}
-                      alt={`${product.name} — imagem ${selectedImageIdx + 1}`}
-                      loading="eager"
-                      className="w-full h-full object-cover object-center"
-                    />
+                  {/* Photos vs 3D Segmented Switcher */}
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="inline-flex border border-stone-300 bg-white p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('photos')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                          viewMode === 'photos'
+                            ? 'bg-[#111111] text-white'
+                            : 'text-stone-600 hover:text-[#111111]'
+                        }`}
+                      >
+                        <ImageIcon className="w-3.5 h-3.5" />
+                        <span>Fotos ({images.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('3d')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                          viewMode === '3d'
+                            ? 'bg-[#C8102E] text-white'
+                            : 'text-stone-600 hover:text-[#111111]'
+                        }`}
+                      >
+                        <Box className="w-3.5 h-3.5" />
+                        <span>Visualização 3D</span>
+                      </button>
+                    </div>
+
+                    {viewMode === '3d' && (
+                      <span className="text-[11px] font-medium text-stone-500 hidden sm:inline">
+                        Simulação 3D nas cores do modelo
+                      </span>
+                    )}
                   </div>
 
-                  {images.length > 1 && (
-                    <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar pt-1">
-                      {images.map((imgUrl, idx) => (
-                        <button
-                          key={`${imgUrl}-${idx}`}
-                          type="button"
-                          onClick={() => setSelectedImageIdx(idx)}
-                          className={`w-20 h-16 shrink-0 bg-[#F5F5F4] overflow-hidden border-2 transition-colors cursor-pointer ${
-                            selectedImageIdx === idx
-                              ? 'border-[#111111]'
-                              : 'border-transparent hover:border-stone-300'
-                          }`}
-                        >
-                          <SmartImage
-                            src={imgUrl}
-                            alt={`${product.name} miniatura ${idx + 1}`}
-                            className="w-full h-full object-cover"
-                          />
-                        </button>
-                      ))}
+                  {viewMode === '3d' ? (
+                    <div className="space-y-2.5">
+                      <Suspense
+                        fallback={
+                          <div className="aspect-[4/3] min-h-[320px] sm:min-h-[420px] bg-[#F4F4F2] border border-stone-200 flex items-center justify-center text-xs font-semibold uppercase tracking-wider text-stone-500">
+                            Carregando estúdio 3D...
+                          </div>
+                        }
+                      >
+                        <Sneaker3DViewer product={product} selectedColor={selectedColor} />
+                      </Suspense>
+                      <p className="text-[11px] text-stone-500">
+                        Visualização 3D interativa gratuita gerada com as cores e o perfil deste
+                        tênis. Use as fotos reais ao lado para conferir acabamentos exatos da marca.
+                      </p>
                     </div>
+                  ) : (
+                    <>
+                      <div className="aspect-[4/3] w-full bg-[#F5F5F4] overflow-hidden mb-3">
+                        <SmartImage
+                          src={images[selectedImageIdx] || images[0]}
+                          alt={`${product.name} — imagem ${selectedImageIdx + 1}`}
+                          loading="eager"
+                          className="w-full h-full object-cover object-center"
+                        />
+                      </div>
+
+                      {images.length > 1 && (
+                        <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar pt-1">
+                          {images.map((imgUrl, idx) => (
+                            <button
+                              key={`${imgUrl}-${idx}`}
+                              type="button"
+                              onClick={() => setSelectedImageIdx(idx)}
+                              className={`w-20 h-16 shrink-0 bg-[#F5F5F4] overflow-hidden border-2 transition-colors cursor-pointer ${
+                                selectedImageIdx === idx
+                                  ? 'border-[#111111]'
+                                  : 'border-transparent hover:border-stone-300'
+                              }`}
+                            >
+                              <SmartImage
+                                src={imgUrl}
+                                alt={`${product.name} miniatura ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -297,14 +420,14 @@ export function ProductDetailModal({
                     )}
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex items-stretch gap-3 mb-4">
+                  {/* Action Buttons: Add to Cart + Favorite + Share */}
+                  <div className="flex items-stretch gap-2 mb-4">
                     <motion.button
                       type="button"
                       whileTap={{ scale: 0.98 }}
                       disabled={!hasAnyAvailableSize}
                       onClick={handleAdd}
-                      className={`flex-1 py-4 px-6 text-xs sm:text-sm font-bold uppercase tracking-[0.12em] flex items-center justify-center gap-2 transition-colors min-h-[50px] ${
+                      className={`flex-1 py-4 px-4 sm:px-5 text-xs sm:text-sm font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-2 transition-colors min-h-[50px] ${
                         !hasAnyAvailableSize
                           ? 'bg-stone-200 text-stone-500 cursor-not-allowed'
                           : justAdded
@@ -330,7 +453,7 @@ export function ProductDetailModal({
                     <button
                       type="button"
                       onClick={() => onToggleFavorite(product.id)}
-                      className="px-4 border border-stone-300 hover:border-[#111111] flex items-center justify-center transition-colors cursor-pointer min-w-[50px]"
+                      className="px-3.5 border border-stone-300 hover:border-[#111111] flex items-center justify-center transition-colors cursor-pointer min-w-[48px]"
                       aria-label={isFavorite ? 'Remover dos favoritos' : 'Salvar nos favoritos'}
                     >
                       <Heart
@@ -339,7 +462,63 @@ export function ProductDetailModal({
                         }`}
                       />
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleShareClick()}
+                      className={`px-3.5 border flex items-center justify-center transition-colors cursor-pointer min-w-[48px] ${
+                        shareFeedback !== 'idle'
+                          ? 'border-[#111111] bg-stone-100 text-[#111111]'
+                          : 'border-stone-300 hover:border-[#111111] text-[#111111]'
+                      }`}
+                      aria-label="Compartilhar este tênis"
+                      title="Compartilhar tênis"
+                    >
+                      {shareFeedback === 'copied' ? (
+                        <Check className="w-5 h-5 text-emerald-700" />
+                      ) : (
+                        <Share2 className="w-5 h-5" />
+                      )}
+                    </button>
                   </div>
+
+                  {/* Quick Share Strip (WhatsApp + Copy Link) */}
+                  <AnimatePresence>
+                    {shareFeedback !== 'idle' && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        transition={{ duration: 0.18, ease: EASE_OUT }}
+                        className="mb-4 p-3 bg-[#FAFAFA] border border-stone-200 flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span className="text-xs font-semibold text-[#111111]">
+                          {shareFeedback === 'copied'
+                            ? 'Link do tênis copiado!'
+                            : 'Compartilhar este modelo:'}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={whatsappShareUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#16A34A] hover:bg-[#15803D] text-white text-[11px] font-bold uppercase tracking-wider transition-colors"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>WhatsApp</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyShareLink()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-stone-300 bg-white hover:border-[#111111] text-[11px] font-bold uppercase tracking-wider text-[#111111] cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar link</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   {/* Non-blocking post-add flow: keep shopping OR proceed to checkout */}
                   <AnimatePresence>

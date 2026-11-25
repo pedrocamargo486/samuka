@@ -37,6 +37,8 @@ export interface SneakerWebLookupResponse {
   suggestedPrice: number;
   imageUrls: string[];
   sources: { title: string; uri: string }[];
+  sourceMode?: 'live_catalog' | 'gemini_search';
+  warning?: string;
 }
 
 export async function checkIsUserAdmin(uid: string, email: string | null): Promise<boolean> {

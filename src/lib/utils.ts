@@ -1,10 +1,63 @@
-import type { CartItem, CustomerOrderInfo, ShippingQuote, StoreConfig } from '../types';
+import type { CartItem, CustomerOrderInfo, Product, ShippingQuote, StoreConfig } from '../types';
 
 export function formatBRL(value: number): string {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   }).format(value);
+}
+
+export function buildProductShareUrl(product: Product): string {
+  if (typeof window === 'undefined') return '';
+  const url = new URL(window.location.origin + '/');
+  url.searchParams.set('produto', product.slug || product.id);
+  return url.toString();
+}
+
+export async function shareSneaker(
+  product: Product,
+  storeName: string
+): Promise<{
+  outcome: 'shared' | 'copied' | 'cancelled' | 'manual';
+  url: string;
+  shareText: string;
+  whatsappShareUrl: string;
+}> {
+  const url = buildProductShareUrl(product);
+  const hasPromo =
+    product.isPromo && product.promoPrice > 0 && product.promoPrice < product.price;
+  const effectivePrice = hasPromo ? product.promoPrice : product.price;
+  const priceLabel = effectivePrice > 0 ? ` por ${formatBRL(effectivePrice)}` : '';
+  const shareText = `Confira ${product.name} (${product.brandName})${priceLabel} na ${
+    storeName || 'SAMUKA TÊNIS'
+  }:`;
+  const whatsappShareUrl = `https://wa.me/?text=${encodeURIComponent(`${shareText} ${url}`)}`;
+
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({
+        title: `${product.name} | ${storeName || 'SAMUKA TÊNIS'}`,
+        text: shareText,
+        url,
+      });
+      return { outcome: 'shared', url, shareText, whatsappShareUrl };
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return { outcome: 'cancelled', url, shareText, whatsappShareUrl };
+      }
+    }
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(url);
+      return { outcome: 'copied', url, shareText, whatsappShareUrl };
+    } catch {
+      // Fallback to manual share menu
+    }
+  }
+
+  return { outcome: 'manual', url, shareText, whatsappShareUrl };
 }
 
 export function slugify(text: string): string {

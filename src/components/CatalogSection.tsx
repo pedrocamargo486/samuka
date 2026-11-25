@@ -12,6 +12,7 @@ import { ProductCard } from './ProductCard';
 interface CatalogSectionProps {
   products: Product[];
   brands: Brand[];
+  storeName?: string;
   filters: ProductFilters;
   onUpdateFilters: (patch: Partial<ProductFilters>) => void;
   onResetFilters: () => void;
@@ -43,6 +44,7 @@ const TYPE_QUICK_CHIPS: { key: SneakerType | 'todos'; label: string }[] = [
 export function CatalogSection({
   products,
   brands,
+  storeName = 'SAMUKA TÊNIS',
   filters,
   onUpdateFilters,
   onResetFilters,
@@ -498,6 +500,7 @@ export function CatalogSection({
               <ProductCard
                 key={product.id}
                 product={product}
+                storeName={storeName}
                 isFavorite={favorites.includes(product.id)}
                 onToggleFavorite={onToggleFavorite}
                 onSelectProduct={onSelectProduct}

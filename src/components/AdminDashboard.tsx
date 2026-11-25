@@ -350,7 +350,10 @@ export function AdminDashboard({
         };
       });
 
-      notify('Informações preenchidas! Selecione abaixo as fotos que deseja importar.');
+      notify(
+        result.warning ||
+          'Informações preenchidas automaticamente da web! Selecione abaixo as fotos que deseja importar.'
+      );
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Erro ao buscar informações do tênis na web.'

@@ -338,6 +338,7 @@ export function App() {
             <CatalogSection
               products={products}
               brands={brands}
+              storeName={storeConfig.storeName}
               filters={filters}
               onUpdateFilters={(patch) => setFilters((prev) => ({ ...prev, ...patch }))}
               onResetFilters={() => {
@@ -363,6 +364,7 @@ export function App() {
 
           <ProductDetailModal
             product={selectedProduct}
+            storeName={storeConfig.storeName}
             isFavorite={selectedProduct ? favorites.includes(selectedProduct.id) : false}
             cartCount={cartCount}
             onClose={handleCloseProductModal}

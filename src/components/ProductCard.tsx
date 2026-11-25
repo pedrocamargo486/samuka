@@ -1,12 +1,14 @@
-import { Heart } from 'lucide-react';
+import { useState } from 'react';
+import { Check, Heart, Share2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { GENDER_LABELS, SNEAKER_TYPE_LABELS } from '../lib/seedData';
-import { formatBRL } from '../lib/utils';
+import { formatBRL, shareSneaker } from '../lib/utils';
 import type { Product } from '../types';
 import { SmartImage } from './SmartImage';
 
 interface ProductCardProps {
   product: Product;
+  storeName?: string;
   isFavorite: boolean;
   onToggleFavorite: (productId: string) => void;
   onSelectProduct: (product: Product) => void;
@@ -16,10 +18,13 @@ const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
 export function ProductCard({
   product,
+  storeName = 'SAMUKA TÊNIS',
   isFavorite,
   onToggleFavorite,
   onSelectProduct,
 }: ProductCardProps) {
+  const [copiedShare, setCopiedShare] = useState(false);
+
   const hasValidPromo =
     product.isPromo && product.promoPrice > 0 && product.promoPrice < product.price;
   const displayPrice = hasValidPromo ? product.promoPrice : product.price;
@@ -35,6 +40,17 @@ export function ProductCard({
   } else if (product.isNewRelease) {
     statusText = 'Lançamento';
   }
+
+  const handleQuickShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const res = await shareSneaker(product, storeName);
+    if (res.outcome === 'copied') {
+      setCopiedShare(true);
+      setTimeout(() => setCopiedShare(false), 2200);
+    } else if (res.outcome === 'manual') {
+      window.open(res.whatsappShareUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   return (
     <motion.article
@@ -76,7 +92,7 @@ export function ProductCard({
           </span>
         )}
 
-        {/* Favorite Toggle with subtle tap scale */}
+        {/* Favorite Toggle */}
         <motion.button
           type="button"
           whileTap={{ scale: 0.85 }}
@@ -137,13 +153,28 @@ export function ProductCard({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => onSelectProduct(product)}
-            className="w-full py-2.5 px-3 bg-[#111111] text-white text-xs font-bold uppercase tracking-[0.1em] hover:bg-[#C8102E] transition-colors cursor-pointer min-h-[40px]"
-          >
-            VER PRODUTO
-          </button>
+          <div className="flex items-stretch gap-1.5">
+            <button
+              type="button"
+              onClick={() => onSelectProduct(product)}
+              className="flex-1 py-2.5 px-2 sm:px-3 bg-[#111111] text-white text-[11px] sm:text-xs font-bold uppercase tracking-[0.08em] hover:bg-[#C8102E] transition-colors cursor-pointer min-h-[40px]"
+            >
+              VER PRODUTO
+            </button>
+            <button
+              type="button"
+              onClick={(e) => void handleQuickShare(e)}
+              title={copiedShare ? 'Link copiado!' : 'Compartilhar tênis'}
+              aria-label={`Compartilhar ${product.name}`}
+              className={`w-10 shrink-0 border flex items-center justify-center transition-colors cursor-pointer min-h-[40px] ${
+                copiedShare
+                  ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
+                  : 'border-stone-300 text-[#111111] hover:border-[#111111]'
+              }`}
+            >
+              {copiedShare ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
       </div>
     </motion.article>
