@@ -94,6 +94,8 @@ type AdminTab =
   | 'configuracoes'
   | 'equipe';
 
+const MAX_PRODUCT_IMAGES = 15;
+
 const EMPTY_PRODUCT_FORM: Omit<Product, 'createdAt' | 'updatedAt'> = {
   id: '',
   name: '',
@@ -424,7 +426,7 @@ export function AdminDashboard({
         const preservedManualImages = prev.images.filter((img) => !previousAutoImages.has(img));
         const nextImages = Array.from(
           new Set([...preservedManualImages, ...initialAutoImages])
-        ).slice(0, 8);
+        ).slice(0, MAX_PRODUCT_IMAGES);
 
         const preservedManualVideos = (prev.videos || []).filter(
           (vid) => !previousAutoVideos.has(vid)
@@ -477,7 +479,7 @@ export function AdminDashboard({
               const updatedImages = prev.images.map((img) => replaceMap.get(img) || img);
               return {
                 ...prev,
-                images: Array.from(new Set(updatedImages)).slice(0, 8),
+                images: Array.from(new Set(updatedImages)).slice(0, MAX_PRODUCT_IMAGES),
               };
             });
           })
@@ -522,6 +524,13 @@ export function AdminDashboard({
       return;
     }
 
+    if (editingProduct.images.length >= MAX_PRODUCT_IMAGES) {
+      setErrorMessage(
+        `Limite de ${MAX_PRODUCT_IMAGES} fotos atingido no anúncio. Remova alguma foto antes de adicionar mais.`
+      );
+      return;
+    }
+
     setImportingImageUrl(imageUrl);
     setErrorMessage('');
     try {
@@ -530,13 +539,70 @@ export function AdminDashboard({
       setEditingProduct((prev) => {
         if (!prev) return prev;
         if (prev.images.includes(storedUrl) || prev.images.includes(imageUrl)) return prev;
-        return { ...prev, images: [...prev.images, storedUrl].slice(0, 8) };
+        if (prev.images.length >= MAX_PRODUCT_IMAGES) return prev;
+        return { ...prev, images: [...prev.images, storedUrl].slice(0, MAX_PRODUCT_IMAGES) };
       });
       notify('Foto adicionada ao anúncio!');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Erro ao importar foto.');
     } finally {
       setImportingImageUrl(null);
+    }
+  };
+
+  const handleImportAllFoundImages = async () => {
+    if (!editingProduct || !webLookupResult?.imageUrls?.length) return;
+    const remainingSlots = MAX_PRODUCT_IMAGES - editingProduct.images.length;
+    if (remainingSlots <= 0) {
+      setErrorMessage(
+        `Limite de ${MAX_PRODUCT_IMAGES} fotos atingido no anúncio. Remova alguma foto antes de adicionar mais.`
+      );
+      return;
+    }
+    const missingUrls = webLookupResult.imageUrls
+      .filter((url) => {
+        const mapped = importedUrlMap[url] || url;
+        return !editingProduct.images.includes(url) && !editingProduct.images.includes(mapped);
+      })
+      .slice(0, remainingSlots);
+
+    if (missingUrls.length === 0) {
+      notify('Todas as fotos encontradas já estão no anúncio.');
+      return;
+    }
+
+    setAutoImportingPhotos(true);
+    setErrorMessage('');
+    try {
+      const pairs = await Promise.all(
+        missingUrls.map(async (remoteUrl) => {
+          try {
+            const storedUrl = await importRemoteImageToStore(remoteUrl);
+            return { remoteUrl, storedUrl };
+          } catch {
+            return { remoteUrl, storedUrl: remoteUrl };
+          }
+        })
+      );
+      setImportedUrlMap((prev) => {
+        const next = { ...prev };
+        pairs.forEach(({ remoteUrl, storedUrl }) => {
+          next[remoteUrl] = storedUrl;
+        });
+        return next;
+      });
+      setEditingProduct((prev) => {
+        if (!prev) return prev;
+        const merged = Array.from(
+          new Set([...prev.images, ...pairs.map((p) => p.storedUrl)])
+        ).slice(0, MAX_PRODUCT_IMAGES);
+        return { ...prev, images: merged };
+      });
+      notify(`${pairs.length} foto(s) importada(s) para o anúncio!`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Erro ao importar fotos em lote.');
+    } finally {
+      setAutoImportingPhotos(false);
     }
   };
 
@@ -558,18 +624,30 @@ export function AdminDashboard({
 
   const handleUploadProductFiles = async (files: FileList | null) => {
     if (!files || !editingProduct) return;
+    const remainingSlots = MAX_PRODUCT_IMAGES - editingProduct.images.length;
+    if (remainingSlots <= 0) {
+      setErrorMessage(
+        `Limite de ${MAX_PRODUCT_IMAGES} fotos atingido no anúncio. Remova alguma foto antes de enviar mais.`
+      );
+      return;
+    }
     setUploadingImage(true);
     setErrorMessage('');
     try {
       const uploadedUrls: string[] = [];
-      for (const file of Array.from(files).slice(0, 6)) {
+      for (const file of Array.from(files).slice(0, remainingSlots)) {
         const url = await uploadProductOrBrandImage(file);
         uploadedUrls.push(url);
       }
       setEditingProduct((prev) =>
-        prev ? { ...prev, images: [...prev.images, ...uploadedUrls].slice(0, 8) } : prev
+        prev
+          ? {
+              ...prev,
+              images: [...prev.images, ...uploadedUrls].slice(0, MAX_PRODUCT_IMAGES),
+            }
+          : prev
       );
-      notify('Imagem enviada com sucesso.');
+      notify(`${uploadedUrls.length} imagem(ns) enviada(s) com sucesso.`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Erro ao enviar imagem.');
     } finally {
@@ -953,14 +1031,26 @@ export function AdminDashboard({
                         <div>
                           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <p className="text-xs font-bold uppercase tracking-wider text-stone-700">
-                              Fotos encontradas (as principais já foram incluídas no anúncio):
+                              Fotos encontradas ({webLookupResult.imageUrls.length}) — até{' '}
+                              {MAX_PRODUCT_IMAGES} no anúncio:
                             </p>
-                            {autoImportingPhotos && (
-                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-stone-600">
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                Salvando fotos na galeria...
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {autoImportingPhotos && (
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-stone-600">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Salvando fotos na galeria...
+                                </span>
+                              )}
+                              {!autoImportingPhotos && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleImportAllFoundImages()}
+                                  className="px-3 py-1.5 bg-[#111111] hover:bg-[#C8102E] text-white text-[11px] font-bold uppercase tracking-wider cursor-pointer transition-colors"
+                                >
+                                  + Importar todas
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                             {webLookupResult.imageUrls.map((url) => {
@@ -1376,9 +1466,14 @@ export function AdminDashboard({
 
                 {/* Images Upload & Presets */}
                 <div className="border-t border-stone-200 pt-5 space-y-3">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-stone-600">
-                    Fotografias do tênis (até 8 imagens)
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Fotografias do tênis (até {MAX_PRODUCT_IMAGES} imagens)
+                    </label>
+                    <span className="font-mono-num text-xs font-bold text-[#111111]">
+                      {editingProduct.images.length} / {MAX_PRODUCT_IMAGES} foto(s) no anúncio
+                    </span>
+                  </div>
 
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <label className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#111111] text-white text-xs font-bold uppercase tracking-wider cursor-pointer hover:bg-stone-800 min-h-[44px] shrink-0">
@@ -1407,8 +1502,19 @@ export function AdminDashboard({
                         onClick={() => {
                           const url = newImageUrlInput.trim();
                           if (!url) return;
+                          if (editingProduct.images.length >= MAX_PRODUCT_IMAGES) {
+                            setErrorMessage(
+                              `Limite de ${MAX_PRODUCT_IMAGES} fotos atingido no anúncio.`
+                            );
+                            return;
+                          }
                           setEditingProduct((p) =>
-                            p ? { ...p, images: [...p.images, url].slice(0, 8) } : p
+                            p
+                              ? {
+                                  ...p,
+                                  images: [...p.images, url].slice(0, MAX_PRODUCT_IMAGES),
+                                }
+                              : p
                           );
                           setNewImageUrlInput('');
                         }}
@@ -1426,11 +1532,22 @@ export function AdminDashboard({
                       <button
                         key={preset.url}
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          if (editingProduct.images.length >= MAX_PRODUCT_IMAGES) {
+                            setErrorMessage(
+                              `Limite de ${MAX_PRODUCT_IMAGES} fotos atingido no anúncio.`
+                            );
+                            return;
+                          }
                           setEditingProduct((p) =>
-                            p ? { ...p, images: [...p.images, preset.url].slice(0, 8) } : p
-                          )
-                        }
+                            p
+                              ? {
+                                  ...p,
+                                  images: [...p.images, preset.url].slice(0, MAX_PRODUCT_IMAGES),
+                                }
+                              : p
+                          );
+                        }}
                         className="px-2.5 py-1.5 border border-stone-300 hover:border-[#111111] bg-stone-50 text-stone-700 cursor-pointer"
                       >
                         + {preset.label}
@@ -1616,103 +1733,154 @@ export function AdminDashboard({
                     </div>
                   </div>
 
-                  {/* Bulk Stock Setter */}
-                  <div className="flex flex-wrap items-center gap-2 bg-[#FAFAFA] border border-stone-200 p-2.5 text-xs">
-                    <span className="font-semibold text-stone-600">Aplicar estoque em lote:</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={bulkStockValue}
-                      onChange={(e) =>
-                        setBulkStockValue(Math.max(0, Math.floor(Number(e.target.value) || 0)))
-                      }
-                      className="font-mono-num w-16 px-2 py-1.5 border border-stone-300 text-center bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next: Record<string, number> = {};
-                        Object.keys(editingProduct.sizes).forEach((s) => {
-                          next[s] = bulkStockValue;
-                        });
-                        setEditingProduct((p) => (p ? { ...p, sizes: next } : p));
-                      }}
-                      className="px-3 py-1.5 bg-[#111111] text-white font-bold uppercase cursor-pointer"
-                    >
-                      Aplicar a todos os tamanhos
-                    </button>
-                  </div>
+                  {/* Bulk Stock Setter + Total Counter */}
+                  {(() => {
+                    const totalPairs = Object.values(editingProduct.sizes).reduce(
+                      (acc, n) => acc + (Number(n) || 0),
+                      0
+                    );
+                    const activeSizeCount = Object.values(editingProduct.sizes).filter(
+                      (n) => (Number(n) || 0) > 0
+                    ).length;
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 bg-[#FAFAFA] border border-stone-200 p-2.5 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold text-stone-600">
+                            Aplicar estoque em lote:
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={bulkStockValue}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => {
+                              const digits = e.target.value.replace(/\D/g, '');
+                              setBulkStockValue(digits ? Math.max(0, parseInt(digits, 10)) : 0);
+                            }}
+                            className="font-mono-num w-16 px-2 py-1.5 border border-stone-300 text-center font-bold text-[#111111] bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next: Record<string, number> = {};
+                              Object.keys(editingProduct.sizes).forEach((s) => {
+                                next[s] = bulkStockValue;
+                              });
+                              setEditingProduct((p) => (p ? { ...p, sizes: next } : p));
+                            }}
+                            className="px-3 py-1.5 bg-[#111111] text-white font-bold uppercase cursor-pointer"
+                          >
+                            Aplicar a todos os tamanhos
+                          </button>
+                        </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-11 gap-2">
+                        <div className="font-mono-num font-bold text-[#111111]">
+                          Total: {totalPairs} par(es) · {activeSizeCount} numeração(ões) ativa(s)
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
                     {Object.entries(editingProduct.sizes)
                       .sort(([a], [b]) => Number(a) - Number(b))
-                      .map(([size, qty]) => (
-                        <div
-                          key={size}
-                          className={`p-2 border text-center ${
-                            qty > 0 ? 'border-[#111111] bg-white' : 'border-stone-200 bg-stone-50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-mono-num text-xs font-bold">{size}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const copy = { ...editingProduct.sizes };
-                                delete copy[size];
-                                setEditingProduct((p) => (p ? { ...p, sizes: copy } : p));
-                              }}
-                              className="text-xs text-stone-400 hover:text-[#C8102E] cursor-pointer px-1"
-                              title="Remover numeração"
-                            >
-                              ×
-                            </button>
+                      .map(([size, qty]) => {
+                        const safeQty = Math.max(0, Number(qty) || 0);
+                        return (
+                          <div
+                            key={size}
+                            className={`p-2.5 border ${
+                              safeQty > 0
+                                ? 'border-[#111111] bg-white'
+                                : 'border-stone-200 bg-stone-50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1 mb-2">
+                              <span className="font-mono-num text-xs font-extrabold text-[#111111]">
+                                Tam. {size}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <span
+                                  className={`font-mono-num text-[11px] font-bold px-1.5 py-0.5 ${
+                                    safeQty > 0
+                                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                      : 'bg-stone-200 text-stone-600'
+                                  }`}
+                                >
+                                  {safeQty} un.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const copy = { ...editingProduct.sizes };
+                                    delete copy[size];
+                                    setEditingProduct((p) => (p ? { ...p, sizes: copy } : p));
+                                  }}
+                                  className="text-xs text-stone-400 hover:text-[#C8102E] cursor-pointer px-1"
+                                  title="Remover numeração"
+                                  aria-label={`Remover numeração ${size}`}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingProduct((p) =>
+                                    p
+                                      ? {
+                                          ...p,
+                                          sizes: {
+                                            ...p.sizes,
+                                            [size]: Math.max(0, safeQty - 1),
+                                          },
+                                        }
+                                      : p
+                                  )
+                                }
+                                className="w-8 h-9 shrink-0 flex items-center justify-center border border-stone-300 bg-white hover:border-[#111111] cursor-pointer"
+                                aria-label={`Diminuir tamanho ${size}`}
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={String(safeQty)}
+                                aria-label={`Quantidade em estoque do tamanho ${size}`}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => {
+                                  const digits = e.target.value.replace(/\D/g, '');
+                                  const val = digits ? Math.max(0, parseInt(digits, 10)) : 0;
+                                  setEditingProduct((p) =>
+                                    p ? { ...p, sizes: { ...p.sizes, [size]: val } } : p
+                                  );
+                                }}
+                                className="font-mono-num flex-1 min-w-[44px] h-9 text-center px-1 border border-stone-300 bg-white text-sm font-extrabold text-[#111111] focus:outline-none focus:border-[#111111]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingProduct((p) =>
+                                    p
+                                      ? {
+                                          ...p,
+                                          sizes: { ...p.sizes, [size]: safeQty + 1 },
+                                        }
+                                      : p
+                                  )
+                                }
+                                className="w-8 h-9 shrink-0 flex items-center justify-center border border-stone-300 bg-white hover:border-[#111111] cursor-pointer"
+                                aria-label={`Aumentar tamanho ${size}`}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setEditingProduct((p) =>
-                                  p
-                                    ? {
-                                        ...p,
-                                        sizes: { ...p.sizes, [size]: Math.max(0, qty - 1) },
-                                      }
-                                    : p
-                                )
-                              }
-                              className="p-1.5 border border-stone-300 hover:border-[#111111] cursor-pointer"
-                              aria-label={`Diminuir tamanho ${size}`}
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <input
-                              type="number"
-                              min="0"
-                              value={qty}
-                              onChange={(e) => {
-                                const val = Math.max(0, Math.floor(Number(e.target.value) || 0));
-                                setEditingProduct((p) =>
-                                  p ? { ...p, sizes: { ...p.sizes, [size]: val } } : p
-                                );
-                              }}
-                              className="font-mono-num w-full text-center py-1 border border-stone-300 text-xs min-h-[34px]"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setEditingProduct((p) =>
-                                  p ? { ...p, sizes: { ...p.sizes, [size]: qty + 1 } } : p
-                                )
-                              }
-                              className="p-1.5 border border-stone-300 hover:border-[#111111] cursor-pointer"
-                              aria-label={`Aumentar tamanho ${size}`}
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
 
                   <div className="flex gap-2 max-w-xs pt-1">
@@ -2666,69 +2834,92 @@ export function AdminDashboard({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-h-[340px] overflow-y-auto pr-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[340px] overflow-y-auto pr-1">
                 {Object.entries(stockDraftSizes)
                   .sort(([a], [b]) => Number(a) - Number(b))
-                  .map(([size, qty]) => (
-                    <div
-                      key={size}
-                      className={`p-2.5 border ${
-                        qty > 0 ? 'border-[#111111] bg-white' : 'border-stone-200 bg-stone-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-mono-num text-xs font-bold">Tam. {size}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const copy = { ...stockDraftSizes };
-                            delete copy[size];
-                            setStockDraftSizes(copy);
-                          }}
-                          className="text-xs text-stone-400 hover:text-[#C8102E] cursor-pointer"
-                          title="Remover tamanho"
-                        >
-                          ×
-                        </button>
+                  .map(([size, qty]) => {
+                    const safeQty = Math.max(0, Number(qty) || 0);
+                    return (
+                      <div
+                        key={size}
+                        className={`p-2.5 border ${
+                          safeQty > 0
+                            ? 'border-[#111111] bg-white'
+                            : 'border-stone-200 bg-stone-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1 mb-2">
+                          <span className="font-mono-num text-xs font-extrabold text-[#111111]">
+                            Tam. {size}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span
+                              className={`font-mono-num text-[11px] font-bold px-1.5 py-0.5 ${
+                                safeQty > 0
+                                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                  : 'bg-stone-200 text-stone-600'
+                              }`}
+                            >
+                              {safeQty} un.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const copy = { ...stockDraftSizes };
+                                delete copy[size];
+                                setStockDraftSizes(copy);
+                              }}
+                              className="text-xs text-stone-400 hover:text-[#C8102E] cursor-pointer px-1"
+                              title="Remover tamanho"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setStockDraftSizes((prev) => ({
+                                ...prev,
+                                [size]: Math.max(0, safeQty - 1),
+                              }))
+                            }
+                            className="w-8 h-9 shrink-0 flex items-center justify-center border border-stone-300 bg-white hover:border-[#111111] cursor-pointer"
+                            aria-label={`Diminuir tamanho ${size}`}
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={String(safeQty)}
+                            aria-label={`Quantidade do tamanho ${size}`}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => {
+                              const digits = e.target.value.replace(/\D/g, '');
+                              const val = digits ? Math.max(0, parseInt(digits, 10)) : 0;
+                              setStockDraftSizes((prev) => ({ ...prev, [size]: val }));
+                            }}
+                            className="font-mono-num flex-1 min-w-[44px] h-9 text-center px-1 border border-stone-300 bg-white text-sm font-extrabold text-[#111111] focus:outline-none focus:border-[#111111]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setStockDraftSizes((prev) => ({
+                                ...prev,
+                                [size]: safeQty + 1,
+                              }))
+                            }
+                            className="w-8 h-9 shrink-0 flex items-center justify-center border border-stone-300 bg-white hover:border-[#111111] cursor-pointer"
+                            aria-label={`Aumentar tamanho ${size}`}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setStockDraftSizes((prev) => ({
-                              ...prev,
-                              [size]: Math.max(0, qty - 1),
-                            }))
-                          }
-                          className="p-2 border border-stone-300 hover:border-[#111111] cursor-pointer"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <input
-                          type="number"
-                          min="0"
-                          value={qty}
-                          onChange={(e) => {
-                            const val = Math.max(0, Math.floor(Number(e.target.value) || 0));
-                            setStockDraftSizes((prev) => ({ ...prev, [size]: val }));
-                          }}
-                          className="font-mono-num w-full text-center py-1.5 border border-stone-300 text-xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setStockDraftSizes((prev) => ({
-                              ...prev,
-                              [size]: qty + 1,
-                            }))
-                          }
-                          className="p-2 border border-stone-300 hover:border-[#111111] cursor-pointer"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
 
               <div className="flex gap-2">

@@ -86,7 +86,7 @@ service cloud.firestore {
       data.type is string && data.type.size() <= 40 && isValidType(data.type) &&
       data.occasion is string && data.occasion.size() <= 80 &&
       isValidStringList(data.colors, 12) &&
-      isValidStringList(data.images, 8) &&
+      isValidStringList(data.images, 15) &&
       (!data.keys().hasAny(['videos']) || isValidStringList(data.videos, 4)) &&
       data.sizes is map && data.sizes.keys().size() <= 25 &&
       data.createdAt is timestamp &&

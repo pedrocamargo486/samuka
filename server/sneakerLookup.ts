@@ -721,7 +721,7 @@ async function searchBingSneakerImages(query: string): Promise<string[]> {
       if (/\.svg(\?|$)/i.test(url)) continue;
       if (blockedDomains.some((d) => url.toLowerCase().includes(d))) continue;
       candidates.add(url);
-      if (candidates.size >= 10) break;
+      if (candidates.size >= 18) break;
     }
 
     const checks = await Promise.all(
@@ -730,7 +730,7 @@ async function searchBingSneakerImages(query: string): Promise<string[]> {
         ok: await verifyReachableImage(url),
       }))
     );
-    return checks.filter((c) => c.ok).map((c) => c.url).slice(0, 6);
+    return checks.filter((c) => c.ok).map((c) => c.url).slice(0, 12);
   } catch {
     return [];
   }
@@ -927,13 +927,13 @@ export async function lookupSneakerFromLiveWebCatalogs(
           if (img.imageUrl && img.imageUrl.startsWith('https://')) {
             imageSet.add(img.imageUrl);
           }
-          if (imageSet.size >= 8) break;
+          if (imageSet.size >= 15) break;
         }
-        if (imageSet.size >= 8) break;
+        if (imageSet.size >= 15) break;
       }
     }
 
-    if (imageSet.size < 2 && hasStrongPrimaryColorMatch) {
+    if (imageSet.size < 4 && hasStrongPrimaryColorMatch) {
       const extraImgs = await searchBingSneakerImages(enrichedQuery);
       extraImgs.forEach((u) => imageSet.add(u));
     }
@@ -989,7 +989,7 @@ export async function lookupSneakerFromLiveWebCatalogs(
         occasion: inferredType.occasion,
         colors,
         suggestedPrice,
-        imageUrls: Array.from(imageSet).slice(0, 8),
+        imageUrls: Array.from(imageSet).slice(0, 15),
         videoUrls,
         videos,
         sources,
@@ -1196,7 +1196,7 @@ Retorne APENAS um objeto JSON válido (sem markdown, sem crases) com a seguinte 
   );
   pageImageResults.flat().forEach((imgUrl) => candidateImages.add(imgUrl));
 
-  const candidateList = Array.from(candidateImages).slice(0, 8);
+  const candidateList = Array.from(candidateImages).slice(0, 12);
   const reachabilityChecks = await Promise.all(
     candidateList.map(async (url) => ({ url, ok: await verifyReachableImage(url) }))
   );
@@ -1204,7 +1204,7 @@ Retorne APENAS um objeto JSON válido (sem markdown, sem crases) com a seguinte 
 
   const mergedImages = Array.from(new Set([...verifiedGeminiImages, ...bingFallbackImages])).slice(
     0,
-    8
+    15
   );
 
   const videoMap = new Map<string, SneakerVideoSuggestion>();
@@ -1300,7 +1300,7 @@ export async function lookupSneakerSmart(query: string): Promise<SneakerLookupRe
       const geminiResult = await lookupSneakerWithGemini(query, videos);
       const combinedImages = Array.from(
         new Set([...(geminiResult.imageUrls || []), ...(liveResult?.imageUrls || [])])
-      ).slice(0, 8);
+      ).slice(0, 15);
 
       return {
         ...geminiResult,

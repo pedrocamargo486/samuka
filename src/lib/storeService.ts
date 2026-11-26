@@ -295,7 +295,7 @@ export async function saveProduct(
     const sanitizedImages = (product.images || [])
       .map((img) => sanitizeImageUrl(img))
       .filter(Boolean)
-      .slice(0, 8);
+      .slice(0, 15);
 
     const sanitizedVideos = (product.videos || [])
       .map((vid) => sanitizeVideoUrl(vid))
