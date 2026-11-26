@@ -22,8 +22,23 @@ import {
   storage,
 } from './firebase';
 import { DEFAULT_STORE_CONFIG, INITIAL_BRANDS, STARTER_SHOWCASE_PRODUCTS } from './seedData';
-import { compressImageToBase64, sanitizeImageUrl, slugify } from './utils';
-import type { AdminUserRecord, Brand, Product, StoreConfig } from '../types';
+import {
+  compressImageToBase64,
+  getLocalISODate,
+  sanitizeImageUrl,
+  sanitizeVideoUrl,
+  slugify,
+} from './utils';
+import type {
+  AdminUserRecord,
+  Brand,
+  CartItem,
+  OrderItem,
+  OrderRecord,
+  Product,
+  SaleRecord,
+  StoreConfig,
+} from '../types';
 
 export interface SneakerWebLookupResponse {
   name: string;
@@ -36,6 +51,8 @@ export interface SneakerWebLookupResponse {
   colors: string[];
   suggestedPrice: number;
   imageUrls: string[];
+  videoUrls?: string[];
+  videos?: { title: string; url: string }[];
   sources: { title: string; uri: string }[];
   sourceMode?: 'live_catalog' | 'gemini_search';
   warning?: string;
@@ -170,25 +187,58 @@ export async function deleteBrand(brandId: string): Promise<void> {
   }
 }
 
-export async function seedInitialBrandsToFirestore(): Promise<void> {
-  const path = 'brands';
-  try {
-    const batch = writeBatch(db);
-    INITIAL_BRANDS.forEach((b) => {
-      batch.set(doc(db, 'brands', b.id), {
-        name: b.name,
-        slug: b.slug,
-        logoUrl: b.logoUrl,
-        order: b.order,
-        active: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    });
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+let brandSeedInFlight: Promise<void> | null = null;
+
+export async function seedInitialBrandsToFirestore(updateExisting = false): Promise<void> {
+  if (brandSeedInFlight) {
+    return brandSeedInFlight;
   }
+  const path = 'brands';
+  brandSeedInFlight = (async () => {
+    try {
+      const existingSnap = await getDocs(collection(db, 'brands'));
+      const existingById = new Map(existingSnap.docs.map((d) => [d.id, d.data()]));
+      const batch = writeBatch(db);
+      let pendingOps = 0;
+
+      INITIAL_BRANDS.forEach((b) => {
+        const refDoc = doc(db, 'brands', b.id);
+        const existingData = existingById.get(b.id);
+        if (!existingData) {
+          batch.set(refDoc, {
+            name: b.name,
+            slug: b.slug,
+            logoUrl: b.logoUrl,
+            order: b.order,
+            active: true,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          pendingOps++;
+        } else if (updateExisting && existingData.createdAt) {
+          batch.update(refDoc, {
+            name: b.name,
+            slug: b.slug,
+            logoUrl: typeof existingData.logoUrl === 'string' ? existingData.logoUrl : b.logoUrl,
+            order: b.order,
+            active: true,
+            updatedAt: serverTimestamp(),
+          });
+          pendingOps++;
+        }
+      });
+
+      if (pendingOps > 0) {
+        await batch.commit();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    } finally {
+      brandSeedInFlight = null;
+    }
+  })();
+
+  return brandSeedInFlight;
 }
 
 export async function fetchProducts(includeInactive = false): Promise<{
@@ -247,6 +297,11 @@ export async function saveProduct(
       .filter(Boolean)
       .slice(0, 8);
 
+    const sanitizedVideos = (product.videos || [])
+      .map((vid) => sanitizeVideoUrl(vid))
+      .filter(Boolean)
+      .slice(0, 4);
+
     const payload = {
       name: product.name.trim().slice(0, 120),
       slug: (slugify(product.slug || product.name) || cleanId).slice(0, 140),
@@ -256,6 +311,7 @@ export async function saveProduct(
       details: (product.details || '').trim().slice(0, 1000),
       price: Math.max(0, Math.min(100000, Number(product.price) || 0)),
       promoPrice: Math.max(0, Math.min(100000, Number(product.promoPrice) || 0)),
+      costPrice: Math.max(0, Math.min(100000, Number(product.costPrice) || 0)),
       isPromo: Boolean(product.isPromo),
       isFeatured: Boolean(product.isFeatured),
       isNewRelease: Boolean(product.isNewRelease),
@@ -266,6 +322,7 @@ export async function saveProduct(
       occasion: (product.occasion || '').trim().slice(0, 80),
       colors: sanitizedColors,
       images: sanitizedImages,
+      videos: sanitizedVideos,
       sizes: sanitizedSizes,
       updatedAt: serverTimestamp(),
     };
@@ -285,6 +342,31 @@ export async function saveProduct(
   }
 }
 
+export async function updateProductStock(
+  productId: string,
+  sizes: Record<string, number>,
+  outOfStock?: boolean
+): Promise<void> {
+  const path = `products/${productId}`;
+  try {
+    const sanitizedSizes: Record<string, number> = {};
+    Object.entries(sizes || {}).forEach(([sizeKey, qty]) => {
+      const cleanSize = sizeKey.trim().slice(0, 12);
+      if (cleanSize) {
+        sanitizedSizes[cleanSize] = Math.max(0, Math.floor(Number(qty) || 0));
+      }
+    });
+    const totalPairs = Object.values(sanitizedSizes).reduce((acc, n) => acc + n, 0);
+    await updateDoc(doc(db, 'products', productId), {
+      sizes: sanitizedSizes,
+      outOfStock: typeof outOfStock === 'boolean' ? outOfStock : totalPairs === 0,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
 export async function deleteProduct(productId: string): Promise<void> {
   const path = `products/${productId}`;
   try {
@@ -297,8 +379,13 @@ export async function deleteProduct(productId: string): Promise<void> {
 export async function seedStarterShowcaseToFirestore(): Promise<void> {
   const path = 'products';
   try {
+    const existingSnap = await getDocs(collection(db, 'products'));
+    const existingIds = new Set(existingSnap.docs.map((d) => d.id));
     const batch = writeBatch(db);
+    let pendingOps = 0;
+
     STARTER_SHOWCASE_PRODUCTS.forEach((p) => {
+      if (existingIds.has(p.id)) return;
       batch.set(doc(db, 'products', p.id), {
         name: p.name,
         slug: p.slug,
@@ -322,8 +409,12 @@ export async function seedStarterShowcaseToFirestore(): Promise<void> {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      pendingOps++;
     });
-    await batch.commit();
+
+    if (pendingOps > 0) {
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -375,7 +466,16 @@ export async function searchSneakerOnWeb(queryText: string): Promise<SneakerWebL
     body: JSON.stringify({ query: queryText }),
   });
 
-  const payload = (await res.json()) as SneakerWebLookupResponse & { error?: string };
+  const rawText = await res.text();
+  let payload: (SneakerWebLookupResponse & { error?: string }) | null = null;
+  try {
+    payload = JSON.parse(rawText) as SneakerWebLookupResponse & { error?: string };
+  } catch {
+    throw new Error(
+      `O servidor retornou uma resposta inesperada (HTTP ${res.status}). Verifique os logs da função ou a chave GEMINI_API_KEY nas variáveis de ambiente.`
+    );
+  }
+
   if (!res.ok) {
     throw new Error(payload.error || 'Erro ao pesquisar tênis na web.');
   }
@@ -397,25 +497,137 @@ export async function importRemoteImageToStore(imageUrl: string): Promise<string
     body: JSON.stringify({ url: imageUrl }),
   });
 
-  const payload = (await res.json()) as {
+  const rawText = await res.text();
+  let payload: {
     mimeType?: string;
     base64Data?: string;
     error?: string;
-  };
+  } = {};
+  try {
+    payload = JSON.parse(rawText) as {
+      mimeType?: string;
+      base64Data?: string;
+      error?: string;
+    };
+  } catch {
+    return imageUrl;
+  }
   if (!res.ok || !payload.base64Data || !payload.mimeType) {
     // If remote download fails, still allow direct verified HTTPS URL as fallback
     return imageUrl;
   }
 
-  // Convert downloaded bytes to File and run through standard upload/compression pipeline
-  const byteChars = atob(payload.base64Data);
-  const byteNumbers = new Uint8Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) {
-    byteNumbers[i] = byteChars.charCodeAt(i);
+  try {
+    // Convert downloaded bytes to File and run through standard upload/compression pipeline
+    const byteChars = atob(payload.base64Data);
+    const byteNumbers = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) {
+      byteNumbers[i] = byteChars.charCodeAt(i);
+    }
+    const ext = payload.mimeType.split('/')[1] || 'jpg';
+    const file = new File([byteNumbers], `imported.${ext}`, { type: payload.mimeType });
+    return await uploadProductOrBrandImage(file);
+  } catch {
+    return imageUrl;
   }
-  const ext = payload.mimeType.split('/')[1] || 'jpg';
-  const file = new File([byteNumbers], `imported.${ext}`, { type: payload.mimeType });
-  return uploadProductOrBrandImage(file);
+}
+
+export async function uploadProductVideo(file: File): Promise<string> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    throw new Error('Faça login como administrador para enviar vídeos.');
+  }
+  const maxBytes = 45 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error('O vídeo excede 45 MB. Comprima o arquivo ou cole um link do YouTube/MP4.');
+  }
+
+  const safeExt = file.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'mp4';
+  const fileName = `uploads/videos/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+  try {
+    const storageRef = ref(storage, fileName);
+    await uploadBytes(storageRef, file);
+    const url = await getDownloadURL(storageRef);
+    return url;
+  } catch {
+    throw new Error(
+      'Não foi possível enviar o arquivo de vídeo para o Storage. Cole o link direto do vídeo (YouTube ou MP4).'
+    );
+  }
+}
+
+export async function fetchSales(): Promise<SaleRecord[]> {
+  const user = auth.currentUser;
+  if (!user) return [];
+  const path = 'sales';
+  try {
+    const isOwner = user.email === PRIMARY_OWNER_EMAIL && user.emailVerified;
+    const q = isOwner
+      ? query(collection(db, 'sales'))
+      : query(collection(db, 'sales'), where('recordedBy', '==', user.uid));
+    const snap = await getDocs(q);
+    const list = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<SaleRecord, 'id'>),
+    }));
+    return list.sort((a, b) => {
+      if (a.soldDate !== b.soldDate) return b.soldDate.localeCompare(a.soldDate);
+      return b.id.localeCompare(a.id);
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function recordSale(
+  sale: Omit<SaleRecord, 'id' | 'recordedBy' | 'createdAt'>
+): Promise<string> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    throw new Error('Faça login como administrador para registrar vendas.');
+  }
+  const saleId = `sale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const path = `sales/${saleId}`;
+
+  const quantity = Math.max(1, Math.min(999, Math.floor(Number(sale.quantity) || 1)));
+  const salePrice = Math.max(0, Math.min(100000, Number(sale.salePrice) || 0));
+  const costPrice = Math.max(0, Math.min(100000, Number(sale.costPrice) || 0));
+  const extraFee = Math.max(0, Math.min(100000, Number(sale.extraFee) || 0));
+  const profit = Number(((salePrice - costPrice) * quantity - extraFee).toFixed(2));
+  const validDate = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(sale.soldDate)
+    ? sale.soldDate
+    : new Date().toISOString().slice(0, 10);
+
+  try {
+    await setDoc(doc(db, 'sales', saleId), {
+      productId: (sale.productId || '').trim().slice(0, 120),
+      productName: sale.productName.trim().slice(0, 140),
+      brandName: (sale.brandName || '').trim().slice(0, 64),
+      size: (sale.size || '').trim().slice(0, 12),
+      quantity,
+      salePrice,
+      costPrice,
+      extraFee,
+      profit,
+      paymentMethod: (sale.paymentMethod || 'Pix').trim().slice(0, 40),
+      notes: (sale.notes || '').trim().slice(0, 200),
+      soldDate: validDate,
+      recordedBy: uid,
+      createdAt: serverTimestamp(),
+    });
+    return saleId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteSale(saleId: string): Promise<void> {
+  const path = `sales/${saleId}`;
+  try {
+    await deleteDoc(doc(db, 'sales', saleId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
 }
 
 export async function fetchAdmins(): Promise<AdminUserRecord[]> {
@@ -453,3 +665,239 @@ export async function removeAdminUser(uid: string): Promise<void> {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+export async function createCustomerOrder(params: {
+  customerName: string;
+  customerPhone: string;
+  deliveryMethod: 'delivery' | 'pickup';
+  customerCep: string;
+  customerAddress: string;
+  subtotal: number;
+  shippingCost: number;
+  total: number;
+  items: CartItem[];
+  notes?: string;
+}): Promise<{ id: string; orderNumber: string }> {
+  const randomSuffix = Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X');
+  const timeCode = Date.now().toString(36).slice(-2).toUpperCase();
+  const orderNumber = `SAM-${timeCode}${randomSuffix}`.slice(0, 24);
+  const orderId = `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const path = `orders/${orderId}`;
+
+  const cleanPhone = (params.customerPhone || '').trim();
+  const safePhone = cleanPhone.length >= 4 ? cleanPhone.slice(0, 32) : '0000';
+
+  const sanitizedItems: OrderItem[] = params.items.slice(0, 20).map((item) => ({
+    productId: (item.productId || '').trim().slice(0, 120),
+    productName: (item.name || 'Tênis').trim().slice(0, 140) || 'Tênis',
+    brandName: (item.brandName || '').trim().slice(0, 64),
+    size: (item.size || '').trim().slice(0, 12),
+    color: (item.color || '').trim().slice(0, 40),
+    quantity: Math.max(1, Math.min(99, Math.floor(Number(item.quantity) || 1))),
+    unitPrice: Math.max(0, Math.min(100000, Number(item.unitPrice) || 0)),
+    image: sanitizeImageUrl(item.image || '').slice(0, 500),
+  }));
+
+  if (sanitizedItems.length === 0) {
+    throw new Error('O pedido precisa conter pelo menos um item.');
+  }
+
+  const subtotal = Math.max(0, Math.min(500000, Number(params.subtotal) || 0));
+  const shippingCost = Math.max(0, Math.min(10000, Number(params.shippingCost) || 0));
+  const total = Math.max(0, Math.min(500000, Number(params.total) || subtotal + shippingCost));
+
+  const payload = {
+    orderNumber,
+    customerName: (params.customerName || 'Cliente').trim().slice(0, 120) || 'Cliente',
+    customerPhone: safePhone,
+    deliveryMethod: params.deliveryMethod === 'pickup' ? ('pickup' as const) : ('delivery' as const),
+    customerCep: (params.customerCep || '').trim().slice(0, 12),
+    customerAddress: (params.customerAddress || '').trim().slice(0, 300),
+    subtotal,
+    shippingCost,
+    total,
+    items: sanitizedItems,
+    status: 'pendente' as const,
+    paymentMethod: '',
+    notes: (params.notes || '').trim().slice(0, 240),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    await setDoc(doc(db, 'orders', orderId), payload);
+    return { id: orderId, orderNumber };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function fetchOrders(): Promise<OrderRecord[]> {
+  const user = auth.currentUser;
+  if (!user || user.email !== PRIMARY_OWNER_EMAIL || !user.emailVerified) {
+    return [];
+  }
+  const path = 'orders';
+  try {
+    const snap = await getDocs(collection(db, 'orders'));
+    const list = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<OrderRecord, 'id'>),
+    }));
+    return list.sort((a, b) => {
+      const aTime =
+        typeof (a.createdAt as { seconds?: number } | undefined)?.seconds === 'number'
+          ? (a.createdAt as { seconds: number }).seconds
+          : 0;
+      const bTime =
+        typeof (b.createdAt as { seconds?: number } | undefined)?.seconds === 'number'
+          ? (b.createdAt as { seconds: number }).seconds
+          : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return b.id.localeCompare(a.id);
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function confirmOrderAndDeductStock(params: {
+  order: OrderRecord;
+  products: Product[];
+  paymentMethod: string;
+  extraFee?: number;
+  extraNotes?: string;
+}): Promise<{ deductedItems: number; salesRecorded: number }> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    throw new Error('Faça login como administrador para confirmar pedidos.');
+  }
+  if (params.order.status === 'confirmado') {
+    throw new Error('Este pedido já foi confirmado anteriormente.');
+  }
+
+  const { order, products, paymentMethod, extraFee = 0, extraNotes = '' } = params;
+  const cleanPayment = (paymentMethod || 'Pix').trim().slice(0, 40) || 'Pix';
+  const todayIso = getLocalISODate(new Date());
+
+  // 1. Aggregate deductions by productId -> size
+  const deductionsByProduct = new Map<string, Map<string, number>>();
+  for (const item of order.items) {
+    if (!item.productId || !item.size) continue;
+    let sizeMap = deductionsByProduct.get(item.productId);
+    if (!sizeMap) {
+      sizeMap = new Map<string, number>();
+      deductionsByProduct.set(item.productId, sizeMap);
+    }
+    const prevQty = sizeMap.get(item.size) || 0;
+    sizeMap.set(item.size, prevQty + Math.max(1, Number(item.quantity) || 1));
+  }
+
+  // 2. Fetch fresh product documents and decrement stock per size
+  const productCache = new Map<string, Product>();
+  let deductedItems = 0;
+
+  for (const [productId, sizeDeductions] of deductionsByProduct.entries()) {
+    const localMatch = products.find((p) => p.id === productId);
+    if (localMatch) {
+      productCache.set(productId, localMatch);
+    }
+
+    try {
+      const snap = await getDoc(doc(db, 'products', productId));
+      if (!snap.exists()) continue;
+
+      const freshData = snap.data() as Omit<Product, 'id'>;
+      const freshProduct: Product = { id: snap.id, ...freshData };
+      productCache.set(productId, freshProduct);
+
+      const nextSizes: Record<string, number> = { ...(freshProduct.sizes || {}) };
+      for (const [sizeKey, deductQty] of sizeDeductions.entries()) {
+        if (Object.prototype.hasOwnProperty.call(nextSizes, sizeKey)) {
+          nextSizes[sizeKey] = Math.max(0, (Number(nextSizes[sizeKey]) || 0) - deductQty);
+          deductedItems += deductQty;
+        }
+      }
+
+      await updateProductStock(productId, nextSizes);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `products/${productId}`);
+    }
+  }
+
+  // 3. Record sales for the Profit Calculator (extraFee applied once on the first item)
+  let salesRecorded = 0;
+  for (let idx = 0; idx < order.items.length; idx++) {
+    const item = order.items[idx];
+    const prod = productCache.get(item.productId) || products.find((p) => p.id === item.productId);
+    const qty = Math.max(1, Number(item.quantity) || 1);
+    const salePrice = Math.max(0, Number(item.unitPrice) || 0);
+    const costPrice = Math.max(0, Number(prod?.costPrice) || 0);
+    const itemFee = idx === 0 ? Math.max(0, Number(extraFee) || 0) : 0;
+    const profit = Number(((salePrice - costPrice) * qty - itemFee).toFixed(2));
+    const noteSummary = [
+      `Pedido #${order.orderNumber}`,
+      order.customerName,
+      item.color ? `Cor: ${item.color}` : '',
+      extraNotes.trim(),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 200);
+
+    await recordSale({
+      productId: item.productId,
+      productName: item.productName,
+      brandName: item.brandName || prod?.brandName || '',
+      size: item.size,
+      quantity: qty,
+      salePrice,
+      costPrice,
+      extraFee: itemFee,
+      profit,
+      paymentMethod: cleanPayment,
+      notes: noteSummary,
+      soldDate: todayIso,
+    });
+    salesRecorded += 1;
+  }
+
+  // 4. Mark order confirmed
+  const finalNotes = (extraNotes.trim() || order.notes || '').slice(0, 240);
+  try {
+    await updateDoc(doc(db, 'orders', order.id), {
+      status: 'confirmado',
+      paymentMethod: cleanPayment,
+      notes: finalNotes,
+      confirmedBy: uid.slice(0, 128),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+  }
+
+  return { deductedItems, salesRecorded };
+}
+
+export async function cancelOrder(orderId: string, notes?: string): Promise<void> {
+  const path = `orders/${orderId}`;
+  try {
+    await updateDoc(doc(db, 'orders', orderId), {
+      status: 'cancelado',
+      notes: (notes ?? '').trim().slice(0, 240),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteOrder(orderId: string): Promise<void> {
+  const path = `orders/${orderId}`;
+  try {
+    await deleteDoc(doc(db, 'orders', orderId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+

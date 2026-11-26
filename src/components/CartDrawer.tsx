@@ -22,6 +22,7 @@ import {
   formatCepInput,
   lookupCep,
 } from '../lib/utils';
+import { createCustomerOrder } from '../lib/storeService';
 import type {
   CartItem,
   CustomerOrderInfo,
@@ -77,12 +78,15 @@ export function CartDrawer({
   const [cepSearching, setCepSearching] = useState(false);
   const [formError, setFormError] = useState('');
   const [generatedMessage, setGeneratedMessage] = useState('');
+  const [orderNumber, setOrderNumber] = useState('');
+  const [savingOrder, setSavingOrder] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
   useEffect(() => {
     setGeneratedMessage('');
+    setOrderNumber('');
   }, [items, deliveryMethod, customer, shippingQuote]);
 
   useEffect(() => {
@@ -138,7 +142,7 @@ export function CartDrawer({
     }
   };
 
-  const handleGenerateOrder = () => {
+  const handleGenerateOrder = async () => {
     setFormError('');
     if (items.length === 0) {
       setFormError('Adicione pelo menos um tênis ao carrinho.');
@@ -164,7 +168,49 @@ export function CartDrawer({
       }
     }
 
+    const shippingCostValue =
+      deliveryMethod === 'delivery' &&
+      shippingQuote.status === 'calculated' &&
+      shippingQuote.price !== null
+        ? shippingQuote.price
+        : 0;
+    const totalValue = subtotal + shippingCostValue;
+    const formattedAddress =
+      deliveryMethod === 'delivery'
+        ? [
+            customer.street,
+            customer.number ? `nº ${customer.number}` : '',
+            customer.complement,
+            customer.neighborhood,
+            customer.city && customer.state ? `${customer.city}/${customer.state}` : customer.city,
+          ]
+            .filter(Boolean)
+            .join(', ')
+        : storeConfig.storeAddress || 'Retirada na loja';
+
+    setSavingOrder(true);
+    let resolvedOrderNumber = `SAM-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+    try {
+      const created = await createCustomerOrder({
+        customerName: customer.name.trim(),
+        customerPhone: customer.phone.trim(),
+        deliveryMethod,
+        customerCep: deliveryMethod === 'delivery' ? customer.cep.trim() : '',
+        customerAddress: formattedAddress,
+        subtotal,
+        shippingCost: shippingCostValue,
+        total: totalValue,
+        items,
+      });
+      resolvedOrderNumber = created.orderNumber;
+    } catch {
+      // Offline / transient Firestore errors never block customer WhatsApp checkout
+    } finally {
+      setSavingOrder(false);
+    }
+
     const msg = buildWhatsAppOrderMessage({
+      orderNumber: resolvedOrderNumber,
       storeName: storeConfig.storeName || 'Samuka Tênis',
       items,
       subtotal,
@@ -173,6 +219,7 @@ export function CartDrawer({
       pickupFree: storeConfig.pickupFree,
       customer,
     });
+    setOrderNumber(resolvedOrderNumber);
     setGeneratedMessage(msg);
   };
 
@@ -628,10 +675,17 @@ export function CartDrawer({
                   {/* Generated WhatsApp Order Confirmation Panel */}
                   {generatedMessage && (
                     <div className="border border-[#111111] bg-[#FAFAFA] p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold uppercase tracking-wider text-[#111111]">
-                          Pedido pronto para envio no WhatsApp
-                        </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wider text-[#111111]">
+                            Pedido pronto para envio no WhatsApp
+                          </p>
+                          {orderNumber && (
+                            <p className="font-mono-num text-[11px] font-bold text-[#C8102E] mt-0.5">
+                              Código do pedido: #{orderNumber}
+                            </p>
+                          )}
+                        </div>
                         <button
                           type="button"
                           onClick={handleCopyMessage}
@@ -705,10 +759,11 @@ export function CartDrawer({
                 {!generatedMessage && (
                   <button
                     type="button"
-                    onClick={handleGenerateOrder}
-                    className="w-full py-4 bg-[#111111] hover:bg-[#C8102E] text-white text-xs sm:text-sm font-bold uppercase tracking-[0.12em] transition-colors cursor-pointer min-h-[48px]"
+                    disabled={savingOrder}
+                    onClick={() => void handleGenerateOrder()}
+                    className="w-full py-4 bg-[#111111] hover:bg-[#C8102E] text-white text-xs sm:text-sm font-bold uppercase tracking-[0.12em] transition-colors cursor-pointer disabled:opacity-60 min-h-[48px]"
                   >
-                    FINALIZAR PEDIDO
+                    {savingOrder ? 'GERANDO PEDIDO...' : 'FINALIZAR PEDIDO'}
                   </button>
                 )}
               </div>

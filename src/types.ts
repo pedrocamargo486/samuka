@@ -31,6 +31,7 @@ export interface Product {
   details: string;
   price: number;
   promoPrice: number;
+  costPrice?: number;
   isPromo: boolean;
   isFeatured: boolean;
   isNewRelease: boolean;
@@ -41,9 +42,28 @@ export interface Product {
   occasion: string;
   colors: string[];
   images: string[];
+  videos?: string[];
   sizes: Record<string, number>;
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+export interface SaleRecord {
+  id: string;
+  productId: string;
+  productName: string;
+  brandName: string;
+  size: string;
+  quantity: number;
+  salePrice: number;
+  costPrice: number;
+  extraFee: number;
+  profit: number;
+  paymentMethod: string;
+  notes: string;
+  soldDate: string;
+  recordedBy: string;
+  createdAt?: unknown;
 }
 
 export interface StoreConfig {
@@ -118,3 +138,37 @@ export interface AdminUserRecord {
   role: 'admin';
   createdAt?: unknown;
 }
+
+export type OrderStatus = 'pendente' | 'confirmado' | 'cancelado';
+
+export interface OrderItem {
+  productId: string;
+  productName: string;
+  brandName: string;
+  size: string;
+  color: string;
+  quantity: number;
+  unitPrice: number;
+  image: string;
+}
+
+export interface OrderRecord {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryMethod: 'delivery' | 'pickup';
+  customerCep: string;
+  customerAddress: string;
+  subtotal: number;
+  shippingCost: number;
+  total: number;
+  items: OrderItem[];
+  status: OrderStatus;
+  paymentMethod: string;
+  notes: string;
+  confirmedBy?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+

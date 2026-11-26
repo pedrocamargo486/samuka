@@ -15,4 +15,6 @@ export const DIRTY_DOZEN_CASES = [
   { id: 10, description: 'Unauthenticated list on /admins', collection: 'admins', op: 'list', expected: 'PERMISSION_DENIED' },
   { id: 11, description: 'Non-admin storeConfig whatsapp hijack', collection: 'storeConfig', op: 'update', expected: 'PERMISSION_DENIED' },
   { id: 12, description: 'Oversized or HTML MIME media upload', collection: 'media', op: 'create', expected: 'PERMISSION_DENIED' },
+  { id: 13, description: 'Public read or list of customer PII in /orders', collection: 'orders', op: 'list', expected: 'PERMISSION_DENIED' },
+  { id: 14, description: 'Customer creating pre-confirmed order bypassing pending state', collection: 'orders', op: 'create', expected: 'PERMISSION_DENIED' },
 ];

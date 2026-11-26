@@ -21,3 +21,6 @@
 10. Unauthenticated user listing `/admins` -> DENIED.
 11. Signed-in non-admin modifying `/storeConfig/main` (`whatsappNumber`) -> DENIED.
 12. Admin creating `/media/m1` with `base64Data` > 350KB or invalid MIME type (`text/html`) -> DENIED.
+13. Unauthenticated or non-admin reading/listing/updating/deleting `/orders` containing customer PII -> DENIED.
+14. Customer creating `/orders/o1` directly with `status: 'confirmado'` -> DENIED.
+

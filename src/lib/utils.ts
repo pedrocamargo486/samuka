@@ -84,6 +84,72 @@ export function sanitizeImageUrl(url: string): string {
   return '';
 }
 
+export function sanitizeVideoUrl(url: string): string {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+    return trimmed.slice(0, 500);
+  }
+  return '';
+}
+
+export function parseVideoSource(url: string): {
+  kind: 'youtube' | 'vimeo' | 'direct';
+  src: string;
+} {
+  const clean = sanitizeVideoUrl(url);
+  if (!clean) return { kind: 'direct', src: '' };
+
+  try {
+    const parsed = new URL(clean);
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+
+    if (host === 'youtu.be') {
+      const id = parsed.pathname.split('/').filter(Boolean)[0];
+      if (id) {
+        return { kind: 'youtube', src: `https://www.youtube-nocookie.com/embed/${id}?rel=0` };
+      }
+    }
+
+    if (host === 'youtube.com' || host === 'm.youtube.com') {
+      if (parsed.pathname.startsWith('/shorts/')) {
+        const id = parsed.pathname.split('/')[2];
+        if (id) {
+          return { kind: 'youtube', src: `https://www.youtube-nocookie.com/embed/${id}?rel=0` };
+        }
+      }
+      if (parsed.pathname.startsWith('/embed/')) {
+        const id = parsed.pathname.split('/')[2];
+        if (id) {
+          return { kind: 'youtube', src: `https://www.youtube-nocookie.com/embed/${id}?rel=0` };
+        }
+      }
+      const v = parsed.searchParams.get('v');
+      if (v) {
+        return { kind: 'youtube', src: `https://www.youtube-nocookie.com/embed/${v}?rel=0` };
+      }
+    }
+
+    if (host === 'vimeo.com') {
+      const id = parsed.pathname.split('/').filter(Boolean)[0];
+      if (id && /^\d+$/.test(id)) {
+        return { kind: 'vimeo', src: `https://player.vimeo.com/video/${id}` };
+      }
+    }
+  } catch {
+    // Fallback to direct video tag
+  }
+
+  return { kind: 'direct', src: clean };
+}
+
+export function getLocalISODate(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function sanitizeExternalHref(url: string): string {
   const trimmed = (url || '').trim();
   if (!trimmed) return '';
@@ -222,6 +288,7 @@ export async function calculateShippingQuote(
 }
 
 export function buildWhatsAppOrderMessage(params: {
+  orderNumber?: string;
   storeName: string;
   items: CartItem[];
   subtotal: number;
@@ -230,10 +297,22 @@ export function buildWhatsAppOrderMessage(params: {
   pickupFree: boolean;
   customer: CustomerOrderInfo;
 }): string {
-  const { storeName, items, subtotal, deliveryMethod, shippingQuote, pickupFree, customer } = params;
+  const {
+    orderNumber,
+    storeName,
+    items,
+    subtotal,
+    deliveryMethod,
+    shippingQuote,
+    pickupFree,
+    customer,
+  } = params;
   const lines: string[] = [];
 
   lines.push(`Olá! Gostaria de realizar um pedido na ${storeName || 'Samuka Tênis'}.`);
+  if (orderNumber) {
+    lines.push(`*Pedido:* #${orderNumber}`);
+  }
   lines.push('');
   lines.push('*MEU PEDIDO:*');
   lines.push('');

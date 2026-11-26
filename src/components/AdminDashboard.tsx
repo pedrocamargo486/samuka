@@ -3,14 +3,21 @@ import { signInWithPopup, signOut } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import {
   ArrowLeft,
+  Boxes,
+  Calculator,
+  Check,
   CheckCircle2,
+  ClipboardList,
   ExternalLink,
+  Film,
   Globe,
   Image as ImageIcon,
   Loader2,
   LogOut,
+  Minus,
   Package,
   Pencil,
+  Play,
   Plus,
   Search,
   Settings,
@@ -20,6 +27,7 @@ import {
   Trash2,
   Upload,
   Users,
+  X,
 } from 'lucide-react';
 import {
   ALL_STANDARD_SIZES,
@@ -35,7 +43,9 @@ import {
   deleteProduct,
   fetchAdmins,
   fetchBrands,
+  fetchOrders,
   fetchProducts,
+  fetchSales,
   importRemoteImageToStore,
   removeAdminUser,
   saveBrand,
@@ -44,20 +54,26 @@ import {
   searchSneakerOnWeb,
   seedInitialBrandsToFirestore,
   seedStarterShowcaseToFirestore,
+  updateProductStock,
   uploadProductOrBrandImage,
+  uploadProductVideo,
   type SneakerWebLookupResponse,
 } from '../lib/storeService';
-import { formatBRL, slugify } from '../lib/utils';
+import { formatBRL, parseVideoSource, sanitizeVideoUrl, slugify } from '../lib/utils';
 import type {
   AdminUserRecord,
   Brand,
   GenderOption,
+  OrderRecord,
   Product,
+  SaleRecord,
   ShippingMode,
   SneakerType,
   StoreConfig,
 } from '../types';
 import { BrandLogo } from './BrandLogo';
+import { OrdersTab } from './OrdersTab';
+import { ProfitCalculatorTab } from './ProfitCalculatorTab';
 import { SmartImage } from './SmartImage';
 
 interface AdminDashboardProps {
@@ -69,7 +85,14 @@ interface AdminDashboardProps {
   onBackToStore: () => void;
 }
 
-type AdminTab = 'produtos' | 'marcas' | 'pagina_inicial' | 'configuracoes' | 'equipe';
+type AdminTab =
+  | 'produtos'
+  | 'pedidos'
+  | 'lucros'
+  | 'marcas'
+  | 'pagina_inicial'
+  | 'configuracoes'
+  | 'equipe';
 
 const EMPTY_PRODUCT_FORM: Omit<Product, 'createdAt' | 'updatedAt'> = {
   id: '',
@@ -81,6 +104,7 @@ const EMPTY_PRODUCT_FORM: Omit<Product, 'createdAt' | 'updatedAt'> = {
   details: '',
   price: 0,
   promoPrice: 0,
+  costPrice: 0,
   isPromo: false,
   isFeatured: false,
   isNewRelease: false,
@@ -91,6 +115,7 @@ const EMPTY_PRODUCT_FORM: Omit<Product, 'createdAt' | 'updatedAt'> = {
   occasion: '',
   colors: [],
   images: [],
+  videos: [],
   sizes: {
     '34': 0,
     '35': 0,
@@ -117,6 +142,8 @@ export function AdminDashboard({
   const [activeTab, setActiveTab] = useState<AdminTab>('produtos');
   const [products, setProducts] = useState<Product[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
   const [admins, setAdmins] = useState<AdminUserRecord[]>([]);
   const [configDraft, setConfigDraft] = useState<StoreConfig>(storeConfig);
 
@@ -131,15 +158,27 @@ export function AdminDashboard({
   const [isNewProduct, setIsNewProduct] = useState(true);
   const [newColorInput, setNewColorInput] = useState('');
   const [newImageUrlInput, setNewImageUrlInput] = useState('');
+  const [newVideoUrlInput, setNewVideoUrlInput] = useState('');
   const [customSizeInput, setCustomSizeInput] = useState('');
+  const [bulkStockValue, setBulkStockValue] = useState(2);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [productSearch, setProductSearch] = useState('');
+
+  // Quick Stock Modal State
+  const [stockModalProduct, setStockModalProduct] = useState<Product | null>(null);
+  const [stockDraftSizes, setStockDraftSizes] = useState<Record<string, number>>({});
+  const [stockModalCustomSize, setStockModalCustomSize] = useState('');
+  const [stockModalBulkQty, setStockModalBulkQty] = useState(2);
+  const [savingStockModal, setSavingStockModal] = useState(false);
 
   // Smart Web Sneaker Lookup State
   const [webSearchQuery, setWebSearchQuery] = useState('');
   const [webSearching, setWebSearching] = useState(false);
   const [webLookupResult, setWebLookupResult] = useState<SneakerWebLookupResponse | null>(null);
   const [importingImageUrl, setImportingImageUrl] = useState<string | null>(null);
+  const [importedUrlMap, setImportedUrlMap] = useState<Record<string, string>>({});
+  const [autoImportingPhotos, setAutoImportingPhotos] = useState(false);
 
   // Brand Form State
   const [editingBrand, setEditingBrand] = useState<Omit<Brand, 'createdAt' | 'updatedAt'> | null>(
@@ -159,12 +198,16 @@ export function AdminDashboard({
     setLoadingData(true);
     setErrorMessage('');
     try {
-      const [prodRes, brandList] = await Promise.all([
+      const [prodRes, brandList, salesList, ordersList] = await Promise.all([
         fetchProducts(true),
         fetchBrands(true),
+        fetchSales(),
+        fetchOrders(),
       ]);
       setProducts(prodRes.products);
       setBrands(brandList);
+      setSales(salesList);
+      setOrders(ordersList);
 
       if (user?.email === PRIMARY_OWNER_EMAIL) {
         const adminList = await fetchAdmins();
@@ -292,6 +335,9 @@ export function AdminDashboard({
     setIsNewProduct(true);
     setWebLookupResult(null);
     setWebSearchQuery('');
+    setNewVideoUrlInput('');
+    setImportedUrlMap({});
+    setAutoImportingPhotos(false);
     setEditingProduct({
       ...EMPTY_PRODUCT_FORM,
       brandId: defaultBrand.id,
@@ -299,6 +345,8 @@ export function AdminDashboard({
       sizes: { ...EMPTY_PRODUCT_FORM.sizes },
       colors: [],
       images: [],
+      videos: [],
+      costPrice: 0,
     });
   };
 
@@ -306,25 +354,60 @@ export function AdminDashboard({
     setIsNewProduct(false);
     setWebLookupResult(null);
     setWebSearchQuery('');
+    setNewVideoUrlInput('');
+    setImportedUrlMap({});
+    setAutoImportingPhotos(false);
     setEditingProduct({
       ...prod,
+      costPrice: prod.costPrice ?? 0,
       colors: [...(prod.colors || [])],
       images: [...(prod.images || [])],
+      videos: [...(prod.videos || [])],
       sizes: { ...(prod.sizes || {}) },
     });
+  };
+
+  const handleOpenStockModal = (prod: Product) => {
+    setStockModalProduct(prod);
+    setStockDraftSizes({ ...(prod.sizes || {}) });
+    setStockModalCustomSize('');
+  };
+
+  const handleSaveQuickStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stockModalProduct) return;
+    setSavingStockModal(true);
+    try {
+      await updateProductStock(stockModalProduct.id, stockDraftSizes);
+      setStockModalProduct(null);
+      await loadAdminCollections();
+      await onRefreshStorefront();
+      notify(`Estoque de "${stockModalProduct.name}" atualizado!`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Erro ao atualizar estoque.');
+    } finally {
+      setSavingStockModal(false);
+    }
   };
 
   const handleWebSneakerSearch = async () => {
     const q = webSearchQuery.trim();
     if (q.length < 2) {
-      setErrorMessage('Digite o nome do tênis para buscar (ex: Nike Shox).');
+      setErrorMessage('Digite o nome e/ou cor do tênis para buscar (ex: 9060 Azul).');
       return;
     }
     setWebSearching(true);
     setErrorMessage('');
     try {
       const result = await searchSneakerOnWeb(q);
+      const previousAutoImages = new Set<string>([
+        ...(webLookupResult?.imageUrls || []),
+        ...Object.values(importedUrlMap),
+      ]);
+      const previousAutoVideos = new Set<string>(webLookupResult?.videoUrls || []);
+
       setWebLookupResult(result);
+      setImportedUrlMap({});
 
       // Match brand from pre-configured brands
       const matchedBrand = brands.find(
@@ -333,8 +416,24 @@ export function AdminDashboard({
           result.name.toLowerCase().includes(b.name.toLowerCase())
       );
 
+      const initialAutoImages = (result.imageUrls || []).slice(0, 4);
+      const initialAutoVideos = (result.videoUrls || []).slice(0, 1);
+
       setEditingProduct((prev) => {
         if (!prev) return prev;
+        const preservedManualImages = prev.images.filter((img) => !previousAutoImages.has(img));
+        const nextImages = Array.from(
+          new Set([...preservedManualImages, ...initialAutoImages])
+        ).slice(0, 8);
+
+        const preservedManualVideos = (prev.videos || []).filter(
+          (vid) => !previousAutoVideos.has(vid)
+        );
+        const nextVideos =
+          preservedManualVideos.length > 0
+            ? preservedManualVideos.slice(0, 4)
+            : Array.from(new Set([...preservedManualVideos, ...initialAutoVideos])).slice(0, 4);
+
         return {
           ...prev,
           name: result.name || prev.name,
@@ -347,12 +446,53 @@ export function AdminDashboard({
           occasion: result.occasion || prev.occasion,
           colors: result.colors.length > 0 ? result.colors : prev.colors,
           price: prev.price > 0 ? prev.price : result.suggestedPrice,
+          images: nextImages,
+          videos: nextVideos,
         };
       });
 
+      if (initialAutoImages.length > 0) {
+        setAutoImportingPhotos(true);
+        void Promise.all(
+          initialAutoImages.map(async (remoteUrl) => {
+            try {
+              const storedUrl = await importRemoteImageToStore(remoteUrl);
+              return { remoteUrl, storedUrl };
+            } catch {
+              return { remoteUrl, storedUrl: remoteUrl };
+            }
+          })
+        )
+          .then((pairs) => {
+            setImportedUrlMap((prev) => {
+              const next = { ...prev };
+              pairs.forEach(({ remoteUrl, storedUrl }) => {
+                next[remoteUrl] = storedUrl;
+              });
+              return next;
+            });
+            setEditingProduct((prev) => {
+              if (!prev) return prev;
+              const replaceMap = new Map(pairs.map((p) => [p.remoteUrl, p.storedUrl]));
+              const updatedImages = prev.images.map((img) => replaceMap.get(img) || img);
+              return {
+                ...prev,
+                images: Array.from(new Set(updatedImages)).slice(0, 8),
+              };
+            });
+          })
+          .finally(() => {
+            setAutoImportingPhotos(false);
+          });
+      }
+
+      const photoCount = initialAutoImages.length;
+      const videoCount = initialAutoVideos.length;
       notify(
         result.warning ||
-          'Informações preenchidas automaticamente da web! Selecione abaixo as fotos que deseja importar.'
+          `Dados preenchidos! ${photoCount} foto(s)${
+            videoCount > 0 ? ` e ${videoCount} vídeo` : ''
+          } adicionado(s) ao anúncio.`
       );
     } catch (err) {
       setErrorMessage(
@@ -365,21 +505,55 @@ export function AdminDashboard({
 
   const handleImportFoundImage = async (imageUrl: string) => {
     if (!editingProduct) return;
+    const mappedUrl = importedUrlMap[imageUrl] || imageUrl;
+    const isAlreadyAdded =
+      editingProduct.images.includes(imageUrl) || editingProduct.images.includes(mappedUrl);
+
+    if (isAlreadyAdded) {
+      setEditingProduct((prev) =>
+        prev
+          ? {
+              ...prev,
+              images: prev.images.filter((img) => img !== imageUrl && img !== mappedUrl),
+            }
+          : prev
+      );
+      notify('Foto removida do anúncio.');
+      return;
+    }
+
     setImportingImageUrl(imageUrl);
     setErrorMessage('');
     try {
       const storedUrl = await importRemoteImageToStore(imageUrl);
+      setImportedUrlMap((prev) => ({ ...prev, [imageUrl]: storedUrl }));
       setEditingProduct((prev) => {
         if (!prev) return prev;
-        if (prev.images.includes(storedUrl)) return prev;
+        if (prev.images.includes(storedUrl) || prev.images.includes(imageUrl)) return prev;
         return { ...prev, images: [...prev.images, storedUrl].slice(0, 8) };
       });
-      notify('Foto importada para o produto.');
+      notify('Foto adicionada ao anúncio!');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Erro ao importar foto.');
     } finally {
       setImportingImageUrl(null);
     }
+  };
+
+  const handleToggleFoundVideo = (videoUrl: string) => {
+    if (!editingProduct) return;
+    const currentVideos = editingProduct.videos || [];
+    if (currentVideos.includes(videoUrl)) {
+      setEditingProduct((prev) =>
+        prev ? { ...prev, videos: (prev.videos || []).filter((v) => v !== videoUrl) } : prev
+      );
+      notify('Vídeo removido do anúncio.');
+      return;
+    }
+    setEditingProduct((prev) =>
+      prev ? { ...prev, videos: [...(prev.videos || []), videoUrl].slice(0, 4) } : prev
+    );
+    notify('Vídeo adicionado ao anúncio!');
   };
 
   const handleUploadProductFiles = async (files: FileList | null) => {
@@ -400,6 +574,25 @@ export function AdminDashboard({
       setErrorMessage(err instanceof Error ? err.message : 'Erro ao enviar imagem.');
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  const handleUploadProductVideoFiles = async (files: FileList | null) => {
+    if (!files || !files[0] || !editingProduct) return;
+    setUploadingVideo(true);
+    setErrorMessage('');
+    try {
+      const url = await uploadProductVideo(files[0]);
+      setEditingProduct((prev) =>
+        prev
+          ? { ...prev, videos: [...(prev.videos || []), url].slice(0, 4) }
+          : prev
+      );
+      notify('Vídeo enviado e adicionado ao produto!');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Erro ao enviar vídeo.');
+    } finally {
+      setUploadingVideo(false);
     }
   };
 
@@ -518,10 +711,10 @@ export function AdminDashboard({
 
   const handleSeedBrands = async () => {
     try {
-      await seedInitialBrandsToFirestore();
+      await seedInitialBrandsToFirestore(true);
       await loadAdminCollections();
       await onRefreshStorefront();
-      notify('As 11 marcas iniciais foram gravadas no banco.');
+      notify('As 11 marcas iniciais foram sincronizadas no banco.');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Erro ao importar marcas.');
     }
@@ -594,35 +787,56 @@ export function AdminDashboard({
         )}
 
         {/* Mobile-Optimized Scrollable Navigation Tabs */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-3 mb-6 border-b border-stone-200">
-          {[
-            { key: 'produtos' as AdminTab, label: 'Produtos', icon: Package },
-            { key: 'marcas' as AdminTab, label: 'Marcas', icon: Tag },
-            { key: 'pagina_inicial' as AdminTab, label: 'Banner', icon: Sparkles },
-            { key: 'configuracoes' as AdminTab, label: 'Configurações', icon: Settings },
-            ...(user.email === PRIMARY_OWNER_EMAIL
-              ? [{ key: 'equipe' as AdminTab, label: 'Equipe', icon: Users }]
-              : []),
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key)}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[44px] ${
-                  active
-                    ? 'bg-[#111111] text-white'
-                    : 'bg-white border border-stone-200 text-stone-700 hover:border-[#111111]'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {(() => {
+          const pendingOrdersCount = orders.filter((o) => o.status === 'pendente').length;
+          return (
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-3 mb-6 border-b border-stone-200">
+              {[
+                { key: 'produtos' as AdminTab, label: 'Produtos & Estoque', icon: Package, badge: 0 },
+                {
+                  key: 'pedidos' as AdminTab,
+                  label: 'Pedidos',
+                  icon: ClipboardList,
+                  badge: pendingOrdersCount,
+                },
+                { key: 'lucros' as AdminTab, label: 'Calculadora de Lucros', icon: Calculator, badge: 0 },
+                { key: 'marcas' as AdminTab, label: 'Marcas', icon: Tag, badge: 0 },
+                { key: 'pagina_inicial' as AdminTab, label: 'Banner', icon: Sparkles, badge: 0 },
+                { key: 'configuracoes' as AdminTab, label: 'Configurações', icon: Settings, badge: 0 },
+                ...(user.email === PRIMARY_OWNER_EMAIL
+                  ? [{ key: 'equipe' as AdminTab, label: 'Equipe', icon: Users, badge: 0 }]
+                  : []),
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[44px] ${
+                      active
+                        ? 'bg-[#111111] text-white'
+                        : 'bg-white border border-stone-200 text-stone-700 hover:border-[#111111]'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                    {tab.badge > 0 && (
+                      <span
+                        className={`font-mono-num px-1.5 py-0.5 text-[10px] font-extrabold ${
+                          active ? 'bg-[#C8102E] text-white' : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* TAB 1: PRODUTOS & ESTOQUE */}
         {activeTab === 'produtos' && (
@@ -688,9 +902,9 @@ export function AdminDashboard({
                         Importação Inteligente da Web
                       </h4>
                       <p className="text-xs text-stone-600">
-                        Digite o modelo (ex: <strong>Nike Shox R4</strong>,{' '}
-                        <strong>Adidas Campus 00s</strong>) para buscar descrição, detalhes, cores e
-                        fotos reais em outros sites.
+                        Digite o modelo e a cor (ex: <strong>9060 Azul</strong>,{' '}
+                        <strong>Nike Shox TL Preto</strong>) para buscar descrição, detalhes,
+                        cores, fotos da cor e vídeos automaticamente.
                       </p>
                     </div>
                   </div>
@@ -708,7 +922,7 @@ export function AdminDashboard({
                             void handleWebSneakerSearch();
                           }
                         }}
-                        placeholder="Ex: Nike Shox TL Preto"
+                        placeholder="Ex: New Balance 9060 Azul, Nike Shox TL Preto"
                         className="w-full pl-9 pr-3 py-3 bg-white border border-stone-300 text-sm focus:outline-none focus:border-[#111111] min-h-[44px]"
                       />
                     </div>
@@ -732,36 +946,64 @@ export function AdminDashboard({
                     </button>
                   </div>
 
-                  {/* Discovered Images & Sources */}
+                  {/* Discovered Images, Videos & Sources */}
                   {webLookupResult && (
-                    <div className="space-y-3 pt-2 border-t border-stone-200">
+                    <div className="space-y-4 pt-2 border-t border-stone-200">
                       {webLookupResult.imageUrls.length > 0 ? (
                         <div>
-                          <p className="text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
-                            Fotos encontradas (toque para adicionar ao tênis):
-                          </p>
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                            <p className="text-xs font-bold uppercase tracking-wider text-stone-700">
+                              Fotos encontradas (as principais já foram incluídas no anúncio):
+                            </p>
+                            {autoImportingPhotos && (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-stone-600">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Salvando fotos na galeria...
+                              </span>
+                            )}
+                          </div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                             {webLookupResult.imageUrls.map((url) => {
                               const isImporting = importingImageUrl === url;
+                              const mappedUrl = importedUrlMap[url] || url;
+                              const inAd =
+                                editingProduct.images.includes(url) ||
+                                editingProduct.images.includes(mappedUrl);
                               return (
                                 <div
                                   key={url}
-                                  className="bg-white border border-stone-200 p-1.5 flex flex-col gap-1.5"
+                                  className={`bg-white border p-1.5 flex flex-col gap-1.5 ${
+                                    inAd ? 'border-emerald-600 ring-1 ring-emerald-600/20' : 'border-stone-200'
+                                  }`}
                                 >
-                                  <div className="aspect-[4/3] bg-[#F5F5F4] overflow-hidden">
+                                  <div className="relative aspect-[4/3] bg-[#F5F5F4] overflow-hidden">
                                     <SmartImage
                                       src={url}
                                       alt="Sugestão encontrada na web"
                                       className="w-full h-full object-cover"
                                     />
+                                    {inAd && (
+                                      <span className="absolute top-1 left-1 inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-700 text-white text-[10px] font-bold uppercase">
+                                        <Check className="w-3 h-3" />
+                                        No anúncio
+                                      </span>
+                                    )}
                                   </div>
                                   <button
                                     type="button"
                                     disabled={isImporting}
                                     onClick={() => void handleImportFoundImage(url)}
-                                    className="w-full py-2 bg-[#111111] hover:bg-[#C8102E] text-white text-[11px] font-bold uppercase cursor-pointer disabled:opacity-50"
+                                    className={`w-full py-2 text-[11px] font-bold uppercase cursor-pointer disabled:opacity-50 transition-colors ${
+                                      inAd
+                                        ? 'bg-emerald-50 hover:bg-red-50 text-emerald-800 hover:text-[#C8102E] border border-emerald-200 hover:border-red-200'
+                                        : 'bg-[#111111] hover:bg-[#C8102E] text-white'
+                                    }`}
                                   >
-                                    {isImporting ? 'Importando...' : '+ Usar foto'}
+                                    {isImporting
+                                      ? 'Importando...'
+                                      : inAd
+                                        ? '✓ No anúncio (Remover)'
+                                        : '+ Usar foto'}
                                   </button>
                                 </div>
                               );
@@ -773,6 +1015,71 @@ export function AdminDashboard({
                           Os dados de texto foram preenchidos. Caso nenhuma foto direta tenha sido
                           liberada pelos sites, envie sua foto abaixo ou cole a URL da imagem.
                         </p>
+                      )}
+
+                      {/* Discovered Videos */}
+                      {webLookupResult.videos && webLookupResult.videos.length > 0 && (
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wider text-stone-700 mb-2">
+                            Vídeos encontrados para este modelo:
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {webLookupResult.videos.map((vid) => {
+                              const inAd = (editingProduct.videos || []).includes(vid.url);
+                              const ytMatch = vid.url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+                              const thumbUrl = ytMatch
+                                ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`
+                                : '';
+                              return (
+                                <div
+                                  key={vid.url}
+                                  className={`bg-white border p-2 flex items-center gap-2.5 ${
+                                    inAd ? 'border-emerald-600 ring-1 ring-emerald-600/20' : 'border-stone-200'
+                                  }`}
+                                >
+                                  <a
+                                    href={vid.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="relative w-24 aspect-video bg-black shrink-0 overflow-hidden group"
+                                    title="Assistir no YouTube"
+                                  >
+                                    {thumbUrl ? (
+                                      <img
+                                        src={thumbUrl}
+                                        alt={vid.title}
+                                        className="w-full h-full object-cover opacity-90 group-hover:opacity-100"
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-white">
+                                        <Film className="w-5 h-5" />
+                                      </div>
+                                    )}
+                                    <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                      <Play className="w-5 h-5 text-white fill-white" />
+                                    </span>
+                                  </a>
+                                  <div className="flex-1 min-w-0 space-y-1.5">
+                                    <p className="text-xs font-semibold text-[#111111] line-clamp-2 leading-snug">
+                                      {vid.title}
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleFoundVideo(vid.url)}
+                                      className={`px-2.5 py-1.5 text-[10px] font-bold uppercase cursor-pointer transition-colors ${
+                                        inAd
+                                          ? 'bg-emerald-50 hover:bg-red-50 text-emerald-800 hover:text-[#C8102E] border border-emerald-200'
+                                          : 'bg-[#111111] hover:bg-[#C8102E] text-white'
+                                      }`}
+                                    >
+                                      {inAd ? '✓ No anúncio (Remover)' : '+ Usar vídeo'}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       )}
 
                       {webLookupResult.sources.length > 0 && (
@@ -875,6 +1182,25 @@ export function AdminDashboard({
                           p ? { ...p, promoPrice: Number(e.target.value) } : p
                         )
                       }
+                      className="font-mono-num w-full px-3 py-3 border border-stone-300 text-sm focus:outline-none focus:border-[#111111] min-h-[44px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-1.5">
+                      Custo de compra (R$ · interno)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editingProduct.costPrice ?? 0}
+                      onChange={(e) =>
+                        setEditingProduct((p) =>
+                          p ? { ...p, costPrice: Number(e.target.value) } : p
+                        )
+                      }
+                      placeholder="Ex: 180.00"
                       className="font-mono-num w-full px-3 py-3 border border-stone-300 text-sm focus:outline-none focus:border-[#111111] min-h-[44px]"
                     />
                   </div>
@@ -1147,6 +1473,108 @@ export function AdminDashboard({
                   )}
                 </div>
 
+                {/* Product Videos Upload & URLs */}
+                <div className="border-t border-stone-200 pt-5 space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Vídeos do tênis (até 4 vídeos · MP4, WebM, YouTube ou Vimeo)
+                    </label>
+                    <p className="text-xs text-stone-500">
+                      Envie um vídeo curto do celular/PC ou cole o link do YouTube / Shorts / MP4.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <label className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#111111] text-white text-xs font-bold uppercase tracking-wider cursor-pointer hover:bg-stone-800 min-h-[44px] shrink-0">
+                      <Film className="w-3.5 h-3.5" />
+                      <span>{uploadingVideo ? 'Enviando vídeo...' : 'Enviar vídeo'}</span>
+                      <input
+                        type="file"
+                        accept="video/mp4,video/webm,video/quicktime"
+                        disabled={uploadingVideo}
+                        onChange={(e) => void handleUploadProductVideoFiles(e.target.files)}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <div className="flex gap-2 flex-1">
+                      <input
+                        type="url"
+                        value={newVideoUrlInput}
+                        onChange={(e) => setNewVideoUrlInput(e.target.value)}
+                        placeholder="Ou cole o link do YouTube / Shorts / MP4 (https://...)"
+                        className="flex-1 px-3 py-2.5 border border-stone-300 text-sm min-h-[44px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const url = sanitizeVideoUrl(newVideoUrlInput);
+                          if (!url) {
+                            setErrorMessage('Informe uma URL de vídeo válida (https://...).');
+                            return;
+                          }
+                          setEditingProduct((p) =>
+                            p ? { ...p, videos: [...(p.videos || []), url].slice(0, 4) } : p
+                          );
+                          setNewVideoUrlInput('');
+                        }}
+                        className="px-4 py-2.5 border border-[#111111] text-xs font-bold uppercase cursor-pointer min-h-[44px] shrink-0"
+                      >
+                        Incluir Vídeo
+                      </button>
+                    </div>
+                  </div>
+
+                  {(editingProduct.videos || []).length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      {(editingProduct.videos || []).map((vid, idx) => {
+                        const parsed = parseVideoSource(vid);
+                        return (
+                          <div key={`${vid}-${idx}`} className="border border-stone-200 bg-[#FAFAFA] p-2 space-y-2">
+                            <div className="aspect-video bg-black overflow-hidden">
+                              {parsed.kind === 'youtube' || parsed.kind === 'vimeo' ? (
+                                <iframe
+                                  src={parsed.src}
+                                  title={`Prévia vídeo ${idx + 1}`}
+                                  className="w-full h-full border-0"
+                                  allowFullScreen
+                                />
+                              ) : (
+                                <video
+                                  src={parsed.src}
+                                  controls
+                                  playsInline
+                                  preload="metadata"
+                                  className="w-full h-full object-contain"
+                                />
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-stone-500 truncate">{vid}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingProduct((p) =>
+                                    p
+                                      ? {
+                                          ...p,
+                                          videos: (p.videos || []).filter((_, i) => i !== idx),
+                                        }
+                                      : p
+                                  )
+                                }
+                                className="px-2 py-1 bg-[#C8102E] text-white text-[10px] font-bold uppercase cursor-pointer shrink-0"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {/* Configurable Size Grid */}
                 <div className="border-t border-stone-200 pt-5 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1158,7 +1586,7 @@ export function AdminDashboard({
                         Quantidade 0 desabilita automaticamente a numeração.
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => {
@@ -1188,7 +1616,34 @@ export function AdminDashboard({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-11 gap-2">
+                  {/* Bulk Stock Setter */}
+                  <div className="flex flex-wrap items-center gap-2 bg-[#FAFAFA] border border-stone-200 p-2.5 text-xs">
+                    <span className="font-semibold text-stone-600">Aplicar estoque em lote:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={bulkStockValue}
+                      onChange={(e) =>
+                        setBulkStockValue(Math.max(0, Math.floor(Number(e.target.value) || 0)))
+                      }
+                      className="font-mono-num w-16 px-2 py-1.5 border border-stone-300 text-center bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next: Record<string, number> = {};
+                        Object.keys(editingProduct.sizes).forEach((s) => {
+                          next[s] = bulkStockValue;
+                        });
+                        setEditingProduct((p) => (p ? { ...p, sizes: next } : p));
+                      }}
+                      className="px-3 py-1.5 bg-[#111111] text-white font-bold uppercase cursor-pointer"
+                    >
+                      Aplicar a todos os tamanhos
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-11 gap-2">
                     {Object.entries(editingProduct.sizes)
                       .sort(([a], [b]) => Number(a) - Number(b))
                       .map(([size, qty]) => (
@@ -1213,18 +1668,49 @@ export function AdminDashboard({
                               ×
                             </button>
                           </div>
-                          <input
-                            type="number"
-                            min="0"
-                            value={qty}
-                            onChange={(e) => {
-                              const val = Math.max(0, Math.floor(Number(e.target.value) || 0));
-                              setEditingProduct((p) =>
-                                p ? { ...p, sizes: { ...p.sizes, [size]: val } } : p
-                              );
-                            }}
-                            className="font-mono-num w-full text-center py-1.5 border border-stone-300 text-xs min-h-[36px]"
-                          />
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingProduct((p) =>
+                                  p
+                                    ? {
+                                        ...p,
+                                        sizes: { ...p.sizes, [size]: Math.max(0, qty - 1) },
+                                      }
+                                    : p
+                                )
+                              }
+                              className="p-1.5 border border-stone-300 hover:border-[#111111] cursor-pointer"
+                              aria-label={`Diminuir tamanho ${size}`}
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <input
+                              type="number"
+                              min="0"
+                              value={qty}
+                              onChange={(e) => {
+                                const val = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                setEditingProduct((p) =>
+                                  p ? { ...p, sizes: { ...p.sizes, [size]: val } } : p
+                                );
+                              }}
+                              className="font-mono-num w-full text-center py-1 border border-stone-300 text-xs min-h-[34px]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingProduct((p) =>
+                                  p ? { ...p, sizes: { ...p.sizes, [size]: qty + 1 } } : p
+                                )
+                              }
+                              className="p-1.5 border border-stone-300 hover:border-[#111111] cursor-pointer"
+                              aria-label={`Aumentar tamanho ${size}`}
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                   </div>
@@ -1328,12 +1814,36 @@ export function AdminDashboard({
                               {prod.isPromo && prod.promoPrice > 0
                                 ? ` → ${formatBRL(prod.promoPrice)}`
                                 : ''}{' '}
-                              · Estoque: {totalPairs}
+                              · Estoque: <strong>{totalPairs}</strong> pares
+                              {(prod.videos?.length || 0) > 0 && ` · ${prod.videos!.length} vídeo(s)`}
                             </p>
+                            {/* Size stock summary chips */}
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {Object.entries(prod.sizes || {})
+                                .filter(([, qty]) => qty > 0)
+                                .sort(([a], [b]) => Number(a) - Number(b))
+                                .map(([sz, qty]) => (
+                                  <span
+                                    key={sz}
+                                    className="font-mono-num px-1.5 py-0.5 bg-stone-100 border border-stone-200 text-[10px] font-semibold text-stone-700"
+                                  >
+                                    {sz}: {qty}
+                                  </span>
+                                ))}
+                            </div>
                           </div>
                         </div>
 
                         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenStockModal(prod)}
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-[#111111] hover:bg-[#C8102E] text-white text-xs font-bold cursor-pointer min-h-[40px] transition-colors"
+                          >
+                            <Boxes className="w-3.5 h-3.5" />
+                            <span>Estoque</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => void handleQuickToggleProduct(prod, 'active')}
@@ -1384,6 +1894,34 @@ export function AdminDashboard({
               )}
             </div>
           </div>
+        )}
+
+        {/* TAB: PEDIDOS */}
+        {activeTab === 'pedidos' && (
+          <OrdersTab
+            orders={orders}
+            products={products}
+            onRefreshAll={async () => {
+              await loadAdminCollections();
+              await onRefreshStorefront();
+            }}
+            onNotify={notify}
+            onError={(msg) => setErrorMessage(msg)}
+          />
+        )}
+
+        {/* TAB: CALCULADORA DE LUCROS */}
+        {activeTab === 'lucros' && (
+          <ProfitCalculatorTab
+            products={products}
+            sales={sales}
+            onRefreshAll={async () => {
+              await loadAdminCollections();
+              await onRefreshStorefront();
+            }}
+            onNotify={notify}
+            onError={(msg) => setErrorMessage(msg)}
+          />
         )}
 
         {/* TAB 2: MARCAS */}
@@ -2040,6 +2578,207 @@ export function AdminDashboard({
                 </div>
               ))}
             </div>
+          </div>
+        )}
+        {/* Quick Stock Modal (Adicionar / Modificar Estoque) */}
+        {stockModalProduct && (
+          <div
+            className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+            onClick={() => setStockModalProduct(null)}
+          >
+            <form
+              onSubmit={handleSaveQuickStock}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white border border-[#111111] w-full max-w-2xl p-4 sm:p-6 space-y-5 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3 border-b border-stone-200 pb-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#C8102E]">
+                    Gerenciar Estoque
+                  </p>
+                  <h3 className="font-display text-lg font-extrabold text-[#111111]">
+                    {stockModalProduct.name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStockModalProduct(null)}
+                  className="p-2 text-stone-500 hover:text-[#111111] cursor-pointer"
+                  aria-label="Fechar modal de estoque"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#FAFAFA] border border-stone-200 p-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: Record<string, number> = {};
+                      ALL_STANDARD_SIZES.forEach((s) => {
+                        next[s] = stockDraftSizes[s] ?? 1;
+                      });
+                      setStockDraftSizes(next);
+                    }}
+                    className="px-3 py-1.5 border border-stone-300 bg-white text-xs font-semibold hover:border-[#111111] cursor-pointer"
+                  >
+                    Grade 34–44
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: Record<string, number> = {};
+                      KIDS_SIZES.forEach((s) => {
+                        next[s] = stockDraftSizes[s] ?? 1;
+                      });
+                      setStockDraftSizes(next);
+                    }}
+                    className="px-3 py-1.5 border border-stone-300 bg-white text-xs font-semibold hover:border-[#111111] cursor-pointer"
+                  >
+                    Infantil 26–33
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs">
+                  <input
+                    type="number"
+                    min="0"
+                    value={stockModalBulkQty}
+                    onChange={(e) =>
+                      setStockModalBulkQty(Math.max(0, Math.floor(Number(e.target.value) || 0)))
+                    }
+                    className="font-mono-num w-14 px-2 py-1 border border-stone-300 text-center bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: Record<string, number> = {};
+                      Object.keys(stockDraftSizes).forEach((s) => {
+                        next[s] = stockModalBulkQty;
+                      });
+                      setStockDraftSizes(next);
+                    }}
+                    className="px-2.5 py-1.5 bg-[#111111] text-white font-bold uppercase cursor-pointer"
+                  >
+                    Aplicar a todos
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-h-[340px] overflow-y-auto pr-1">
+                {Object.entries(stockDraftSizes)
+                  .sort(([a], [b]) => Number(a) - Number(b))
+                  .map(([size, qty]) => (
+                    <div
+                      key={size}
+                      className={`p-2.5 border ${
+                        qty > 0 ? 'border-[#111111] bg-white' : 'border-stone-200 bg-stone-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-mono-num text-xs font-bold">Tam. {size}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const copy = { ...stockDraftSizes };
+                            delete copy[size];
+                            setStockDraftSizes(copy);
+                          }}
+                          className="text-xs text-stone-400 hover:text-[#C8102E] cursor-pointer"
+                          title="Remover tamanho"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStockDraftSizes((prev) => ({
+                              ...prev,
+                              [size]: Math.max(0, qty - 1),
+                            }))
+                          }
+                          className="p-2 border border-stone-300 hover:border-[#111111] cursor-pointer"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <input
+                          type="number"
+                          min="0"
+                          value={qty}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                            setStockDraftSizes((prev) => ({ ...prev, [size]: val }));
+                          }}
+                          className="font-mono-num w-full text-center py-1.5 border border-stone-300 text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStockDraftSizes((prev) => ({
+                              ...prev,
+                              [size]: qty + 1,
+                            }))
+                          }
+                          className="p-2 border border-stone-300 hover:border-[#111111] cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={stockModalCustomSize}
+                  onChange={(e) => setStockModalCustomSize(e.target.value)}
+                  placeholder="Adicionar outro tamanho (ex: 45)"
+                  className="font-mono-num flex-1 px-3 py-2 border border-stone-300 text-xs min-h-[40px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const s = stockModalCustomSize.trim();
+                    if (!s) return;
+                    setStockDraftSizes((prev) => ({ ...prev, [s]: prev[s] ?? 1 }));
+                    setStockModalCustomSize('');
+                  }}
+                  className="px-4 py-2 bg-stone-800 text-white text-xs font-bold uppercase cursor-pointer min-h-[40px]"
+                >
+                  + Adicionar Tam.
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-stone-200">
+                <span className="font-mono-num text-xs text-stone-600">
+                  Total:{' '}
+                  <strong>
+                    {Object.values(stockDraftSizes).reduce((acc, n) => acc + n, 0)}
+                  </strong>{' '}
+                  pares disponíveis
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStockModalProduct(null)}
+                    className="px-4 py-2.5 border border-stone-300 text-xs font-bold uppercase cursor-pointer min-h-[42px]"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingStockModal}
+                    className="px-5 py-2.5 bg-[#111111] hover:bg-[#C8102E] text-white text-xs font-bold uppercase tracking-wider cursor-pointer min-h-[42px] disabled:opacity-50"
+                  >
+                    {savingStockModal ? 'Salvando...' : 'Salvar Estoque'}
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         )}
       </div>

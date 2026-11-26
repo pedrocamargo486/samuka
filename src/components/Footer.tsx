@@ -52,7 +52,7 @@ export function Footer({
                   <span>WhatsApp</span>
                 </a>
               )}
-              {instagramHref && (
+              {instagramHref ? (
                 <a
                   href={instagramHref}
                   target="_blank"
@@ -62,6 +62,18 @@ export function Footer({
                   <Instagram className="w-3.5 h-3.5" />
                   <span>Instagram</span>
                 </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById('secao-instagram');
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 border border-stone-700 text-white text-xs font-bold uppercase tracking-wider hover:border-white transition-colors cursor-pointer"
+                >
+                  <Instagram className="w-3.5 h-3.5" />
+                  <span>Instagram</span>
+                </button>
               )}
             </div>
           </div>

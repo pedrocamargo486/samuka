@@ -6,7 +6,7 @@ import {
   fetchSafeRemoteImage,
   lookupSneakerSmart,
   verifyFirebaseBearerToken,
-} from './server/sneakerLookup';
+} from './server/sneakerLookup.js';
 
 async function startServer() {
   const app = express();

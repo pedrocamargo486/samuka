@@ -64,9 +64,9 @@ service cloud.firestore {
       ]) &&
       data.keys().hasOnly([
         'name', 'slug', 'brandId', 'brandName', 'description', 'details',
-        'price', 'promoPrice', 'isPromo', 'isFeatured', 'isNewRelease',
+        'price', 'promoPrice', 'costPrice', 'isPromo', 'isFeatured', 'isNewRelease',
         'outOfStock', 'active', 'gender', 'type', 'occasion',
-        'colors', 'images', 'sizes', 'createdAt', 'updatedAt'
+        'colors', 'images', 'videos', 'sizes', 'createdAt', 'updatedAt'
       ]) &&
       data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
       data.slug is string && data.slug.size() >= 1 && data.slug.size() <= 140 &&
@@ -76,6 +76,7 @@ service cloud.firestore {
       data.details is string && data.details.size() <= 1000 &&
       data.price is number && data.price >= 0 && data.price <= 100000 &&
       data.promoPrice is number && data.promoPrice >= 0 && data.promoPrice <= 100000 &&
+      (!data.keys().hasAny(['costPrice']) || (data.costPrice is number && data.costPrice >= 0 && data.costPrice <= 100000)) &&
       data.isPromo is bool &&
       data.isFeatured is bool &&
       data.isNewRelease is bool &&
@@ -86,7 +87,66 @@ service cloud.firestore {
       data.occasion is string && data.occasion.size() <= 80 &&
       isValidStringList(data.colors, 12) &&
       isValidStringList(data.images, 8) &&
+      (!data.keys().hasAny(['videos']) || isValidStringList(data.videos, 4)) &&
       data.sizes is map && data.sizes.keys().size() <= 25 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidSale(data) {
+      return data.keys().hasAll([
+        'productId', 'productName', 'brandName', 'size', 'quantity',
+        'salePrice', 'costPrice', 'extraFee', 'profit', 'paymentMethod',
+        'notes', 'soldDate', 'recordedBy', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'productId', 'productName', 'brandName', 'size', 'quantity',
+        'salePrice', 'costPrice', 'extraFee', 'profit', 'paymentMethod',
+        'notes', 'soldDate', 'recordedBy', 'createdAt'
+      ]) &&
+      data.productId is string && data.productId.size() <= 120 &&
+      data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 140 &&
+      data.brandName is string && data.brandName.size() <= 64 &&
+      data.size is string && data.size.size() <= 12 &&
+      data.quantity is number && data.quantity >= 1 && data.quantity <= 999 &&
+      data.salePrice is number && data.salePrice >= 0 && data.salePrice <= 100000 &&
+      data.costPrice is number && data.costPrice >= 0 && data.costPrice <= 100000 &&
+      data.extraFee is number && data.extraFee >= 0 && data.extraFee <= 100000 &&
+      data.profit is number && data.profit >= -100000 && data.profit <= 1000000 &&
+      data.paymentMethod is string && data.paymentMethod.size() <= 40 &&
+      data.notes is string && data.notes.size() <= 200 &&
+      data.soldDate is string && data.soldDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+      data.recordedBy is string && data.recordedBy == request.auth.uid && data.recordedBy.size() <= 128 &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+        'orderNumber', 'customerName', 'customerPhone', 'deliveryMethod',
+        'customerCep', 'customerAddress', 'subtotal', 'shippingCost', 'total',
+        'items', 'status', 'paymentMethod', 'notes', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'orderNumber', 'customerName', 'customerPhone', 'deliveryMethod',
+        'customerCep', 'customerAddress', 'subtotal', 'shippingCost', 'total',
+        'items', 'status', 'paymentMethod', 'notes', 'confirmedBy', 'createdAt', 'updatedAt'
+      ]) &&
+      data.orderNumber is string && data.orderNumber.size() >= 3 && data.orderNumber.size() <= 24 &&
+      data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+      data.customerPhone is string && data.customerPhone.size() >= 4 && data.customerPhone.size() <= 32 &&
+      data.deliveryMethod is string && data.deliveryMethod in ['delivery', 'pickup'] &&
+      data.customerCep is string && data.customerCep.size() <= 12 &&
+      data.customerAddress is string && data.customerAddress.size() <= 300 &&
+      data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 500000 &&
+      data.shippingCost is number && data.shippingCost >= 0 && data.shippingCost <= 10000 &&
+      data.total is number && data.total >= 0 && data.total <= 500000 &&
+      data.items is list && data.items.size() >= 1 && data.items.size() <= 20 &&
+      data.items[0] is map &&
+      data.items[0].productName is string && data.items[0].productName.size() >= 1 && data.items[0].productName.size() <= 140 &&
+      data.status is string && data.status in ['pendente', 'confirmado', 'cancelado'] &&
+      data.paymentMethod is string && data.paymentMethod.size() <= 40 &&
+      data.notes is string && data.notes.size() <= 240 &&
+      (!data.keys().hasAny(['confirmedBy']) || (data.confirmedBy is string && data.confirmedBy.size() <= 128)) &&
       data.createdAt is timestamp &&
       data.updatedAt is timestamp;
     }
@@ -170,11 +230,39 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'name', 'slug', 'brandId', 'brandName', 'description', 'details',
-          'price', 'promoPrice', 'isPromo', 'isFeatured', 'isNewRelease',
+          'price', 'promoPrice', 'costPrice', 'isPromo', 'isFeatured', 'isNewRelease',
           'outOfStock', 'active', 'gender', 'type', 'occasion',
-          'colors', 'images', 'sizes', 'updatedAt'
+          'colors', 'images', 'videos', 'sizes', 'updatedAt'
         ]);
       allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // Customer WhatsApp orders (Public create strictly as 'pendente'; Admin-only read/confirm/cancel)
+    match /orders/{orderId} {
+      allow get: if isAdmin() && isValidId(orderId);
+      allow list: if isPrimaryOwner();
+      allow create: if isValidId(orderId) && isValidOrder(incoming()) &&
+        incoming().status == 'pendente' &&
+        !incoming().keys().hasAny(['confirmedBy']) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(orderId) && isValidOrder(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'paymentMethod', 'notes', 'confirmedBy', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(orderId);
+    }
+
+    // Sales & Profit ledger (strictly admin-only, zero public access)
+    match /sales/{saleId} {
+      allow get: if isAdmin() && isValidId(saleId);
+      allow list: if isPrimaryOwner() || (isVerifiedUser() && resource.data.recordedBy == request.auth.uid);
+      allow create: if isAdmin() && isValidId(saleId) && isValidSale(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(saleId);
     }
 
     // Footwear brands (Admin-only writes; cost-safe list rules without exists/get)

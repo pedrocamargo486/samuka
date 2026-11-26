@@ -1,26 +1,27 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowRight,
-  Box,
   Check,
   ChevronLeft,
   Copy,
   Heart,
-  Image as ImageIcon,
   MessageCircle,
+  Play,
+  Ruler,
   Share2,
   ShoppingBag,
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { GENDER_LABELS, SNEAKER_TYPE_LABELS } from '../lib/seedData';
-import { buildProductShareUrl, formatBRL, shareSneaker } from '../lib/utils';
+import {
+  resolveSizeChartKey,
+  SIZE_CHART_KEYS,
+  SIZE_CHARTS,
+} from '../lib/sizeCharts';
+import { buildProductShareUrl, formatBRL, parseVideoSource, shareSneaker } from '../lib/utils';
 import type { Product } from '../types';
 import { SmartImage } from './SmartImage';
-
-const Sneaker3DViewer = lazy(() =>
-  import('./Sneaker3DViewer').then((m) => ({ default: m.Sneaker3DViewer }))
-);
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -45,8 +46,7 @@ export function ProductDetailModal({
   onAddToCart,
   onOpenCart,
 }: ProductDetailModalProps) {
-  const [viewMode, setViewMode] = useState<'photos' | '3d'>('photos');
-  const [selectedImageIdx, setSelectedImageIdx] = useState(0);
+  const [selectedMediaIdx, setSelectedMediaIdx] = useState(0);
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
   const [sizeError, setSizeError] = useState(false);
@@ -54,16 +54,19 @@ export function ProductDetailModal({
   const [shareFeedback, setShareFeedback] = useState<'idle' | 'copied' | 'panel'>('idle');
   const [shareUrl, setShareUrl] = useState('');
   const [whatsappShareUrl, setWhatsappShareUrl] = useState('');
+  const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+  const [activeChartKey, setActiveChartKey] = useState('nike');
 
   useEffect(() => {
     if (product) {
-      setViewMode('photos');
-      setSelectedImageIdx(0);
+      setSelectedMediaIdx(0);
       setSelectedSize('');
       setSelectedColor(product.colors?.[0] || '');
       setSizeError(false);
       setJustAdded(false);
       setShareFeedback('idle');
+      setSizeGuideOpen(false);
+      setActiveChartKey(resolveSizeChartKey(product.brandName, product.gender));
       const url = buildProductShareUrl(product);
       setShareUrl(url);
       const hasPromo =
@@ -78,13 +81,25 @@ export function ProductDetailModal({
   useEffect(() => {
     if (!product) return;
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (sizeGuideOpen) {
+          setSizeGuideOpen(false);
+          return;
+        }
+        onClose();
+      }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [product, onClose]);
+  }, [product, sizeGuideOpen, onClose]);
 
   const images = product?.images?.length ? product.images : [''];
+  const videos = (product?.videos || []).filter((v) => Boolean(v && v.trim()));
+  const mediaItems: { type: 'image' | 'video'; url: string }[] = [
+    ...images.map((url) => ({ type: 'image' as const, url })),
+    ...videos.map((url) => ({ type: 'video' as const, url })),
+  ];
+  const activeMedia = mediaItems[selectedMediaIdx] || mediaItems[0] || { type: 'image' as const, url: '' };
   const sortedSizes = Object.entries(product?.sizes || {}).sort(
     ([a], [b]) => Number(a) - Number(b)
   );
@@ -204,94 +219,76 @@ export function ProductDetailModal({
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12">
-                {/* Left Column: Image Gallery OR Free Interactive 3D Viewer */}
+                {/* Left Column: Photo & Video Gallery */}
                 <div className="lg:col-span-7 p-4 sm:p-6 lg:p-8 bg-[#FAFAFA] border-b lg:border-b-0 lg:border-r border-stone-200">
-                  {/* Photos vs 3D Segmented Switcher */}
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <div className="inline-flex border border-stone-300 bg-white p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setViewMode('photos')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                          viewMode === 'photos'
-                            ? 'bg-[#111111] text-white'
-                            : 'text-stone-600 hover:text-[#111111]'
-                        }`}
-                      >
-                        <ImageIcon className="w-3.5 h-3.5" />
-                        <span>Fotos ({images.length})</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setViewMode('3d')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                          viewMode === '3d'
-                            ? 'bg-[#C8102E] text-white'
-                            : 'text-stone-600 hover:text-[#111111]'
-                        }`}
-                      >
-                        <Box className="w-3.5 h-3.5" />
-                        <span>Visualização 3D</span>
-                      </button>
-                    </div>
-
-                    {viewMode === '3d' && (
-                      <span className="text-[11px] font-medium text-stone-500 hidden sm:inline">
-                        Simulação 3D nas cores do modelo
-                      </span>
-                    )}
-                  </div>
-
-                  {viewMode === '3d' ? (
-                    <div className="space-y-2.5">
-                      <Suspense
-                        fallback={
-                          <div className="aspect-[4/3] min-h-[320px] sm:min-h-[420px] bg-[#F4F4F2] border border-stone-200 flex items-center justify-center text-xs font-semibold uppercase tracking-wider text-stone-500">
-                            Carregando estúdio 3D...
-                          </div>
+                  <div className="aspect-[4/3] w-full bg-[#111111] overflow-hidden mb-3 flex items-center justify-center">
+                    {activeMedia.type === 'video' ? (
+                      (() => {
+                        const parsed = parseVideoSource(activeMedia.url);
+                        if (parsed.kind === 'youtube' || parsed.kind === 'vimeo') {
+                          return (
+                            <iframe
+                              src={parsed.src}
+                              title={`${product.name} vídeo`}
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                              className="w-full h-full border-0"
+                            />
+                          );
                         }
-                      >
-                        <Sneaker3DViewer product={product} selectedColor={selectedColor} />
-                      </Suspense>
-                      <p className="text-[11px] text-stone-500">
-                        Visualização 3D interativa gratuita gerada com as cores e o perfil deste
-                        tênis. Use as fotos reais ao lado para conferir acabamentos exatos da marca.
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="aspect-[4/3] w-full bg-[#F5F5F4] overflow-hidden mb-3">
+                        return (
+                          <video
+                            key={parsed.src}
+                            src={parsed.src}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            className="w-full h-full object-contain bg-black"
+                          />
+                        );
+                      })()
+                    ) : (
+                      <div className="w-full h-full bg-[#F5F5F4]">
                         <SmartImage
-                          src={images[selectedImageIdx] || images[0]}
-                          alt={`${product.name} — imagem ${selectedImageIdx + 1}`}
+                          src={activeMedia.url}
+                          alt={`${product.name} — imagem ${selectedMediaIdx + 1}`}
                           loading="eager"
                           className="w-full h-full object-cover object-center"
                         />
                       </div>
+                    )}
+                  </div>
 
-                      {images.length > 1 && (
-                        <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar pt-1">
-                          {images.map((imgUrl, idx) => (
-                            <button
-                              key={`${imgUrl}-${idx}`}
-                              type="button"
-                              onClick={() => setSelectedImageIdx(idx)}
-                              className={`w-20 h-16 shrink-0 bg-[#F5F5F4] overflow-hidden border-2 transition-colors cursor-pointer ${
-                                selectedImageIdx === idx
-                                  ? 'border-[#111111]'
-                                  : 'border-transparent hover:border-stone-300'
-                              }`}
-                            >
-                              <SmartImage
-                                src={imgUrl}
-                                alt={`${product.name} miniatura ${idx + 1}`}
-                                className="w-full h-full object-cover"
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
+                  {mediaItems.length > 1 && (
+                    <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar pt-1">
+                      {mediaItems.map((media, idx) => (
+                        <button
+                          key={`${media.type}-${media.url}-${idx}`}
+                          type="button"
+                          onClick={() => setSelectedMediaIdx(idx)}
+                          className={`relative w-20 h-16 shrink-0 bg-[#F5F5F4] overflow-hidden border-2 transition-colors cursor-pointer ${
+                            selectedMediaIdx === idx
+                              ? 'border-[#111111]'
+                              : 'border-transparent hover:border-stone-300'
+                          }`}
+                        >
+                          {media.type === 'video' ? (
+                            <div className="w-full h-full bg-[#111111] text-white flex flex-col items-center justify-center gap-1">
+                              <Play className="w-4 h-4 fill-white" />
+                              <span className="text-[9px] font-bold uppercase tracking-wider">
+                                Vídeo
+                              </span>
+                            </div>
+                          ) : (
+                            <SmartImage
+                              src={media.url}
+                              alt={`${product.name} miniatura ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
 
@@ -367,15 +364,28 @@ export function ProductDetailModal({
 
                   {/* Size Grid */}
                   <div className="mb-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-stone-600">
-                        Selecione a numeração
-                      </p>
-                      {selectedSize && (
-                        <span className="font-mono-num text-xs font-semibold text-[#111111]">
-                          Tamanho {selectedSize} selecionado
-                        </span>
-                      )}
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                          Selecione a numeração
+                        </p>
+                        {selectedSize && (
+                          <span className="font-mono-num text-xs font-semibold text-[#111111]">
+                            · Tam {selectedSize}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveChartKey(resolveSizeChartKey(product.brandName, product.gender));
+                          setSizeGuideOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-[#111111] hover:text-[#C8102E] underline underline-offset-4 transition-colors cursor-pointer"
+                      >
+                        <Ruler className="w-3.5 h-3.5" />
+                        <span>Tabela de medidas (cm)</span>
+                      </button>
                     </div>
 
                     {sortedSizes.length === 0 || !hasAnyAvailableSize ? (
@@ -589,6 +599,158 @@ export function ProductDetailModal({
               </div>
             </motion.div>
           </div>
+
+          {/* Size Guide Overlay (BR / Centimeters / US by Brand) */}
+          {sizeGuideOpen && (() => {
+            const activeChart = SIZE_CHARTS[activeChartKey] || SIZE_CHARTS.nike;
+            return (
+              <div
+                className="fixed inset-0 z-[60] bg-black/65 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Guia de medidas em centímetros"
+                onClick={() => setSizeGuideOpen(false)}
+              >
+                <div
+                  className="w-full max-w-2xl bg-white border border-stone-200 max-h-[90vh] flex flex-col shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Ruler className="w-4 h-4 text-[#C8102E]" />
+                      <h2 className="font-display text-base sm:text-lg font-extrabold text-[#111111]">
+                        Guia de Medidas em Centímetros (cm)
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSizeGuideOpen(false)}
+                      className="p-2 text-stone-500 hover:text-[#111111] cursor-pointer"
+                      aria-label="Fechar guia de medidas"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="p-5 overflow-y-auto space-y-5">
+                    {/* Brand Switcher */}
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-stone-500 mb-2">
+                        Escolha a marca para comparar a forma
+                      </p>
+                      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+                        {SIZE_CHART_KEYS.map((key) => {
+                          const chart = SIZE_CHARTS[key];
+                          const active = activeChartKey === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => setActiveChartKey(key)}
+                              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+                                active
+                                  ? 'bg-[#111111] text-white border-[#111111]'
+                                  : 'bg-white text-stone-700 border-stone-300 hover:border-[#111111]'
+                              }`}
+                            >
+                              {chart.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-[#FAFAFA] border border-stone-200 text-xs text-stone-700">
+                      <strong className="text-[#111111]">{activeChart.label}:</strong>{' '}
+                      {activeChart.fitNote}
+                    </div>
+
+                    {/* Conversion Table */}
+                    <div className="border border-stone-200 overflow-x-auto">
+                      <table className="w-full text-left text-xs sm:text-sm">
+                        <thead className="bg-[#111111] text-white text-[11px] uppercase tracking-wider">
+                          <tr>
+                            <th className="px-4 py-3 font-bold">BR (Brasil)</th>
+                            <th className="px-4 py-3 font-bold">Medida (cm)</th>
+                            <th className="px-4 py-3 font-bold">US (EUA)</th>
+                            <th className="px-4 py-3 font-bold text-right">Neste modelo</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-stone-100">
+                          {activeChart.rows.map((row) => {
+                            const qtyInStock = product.sizes?.[row.br] ?? 0;
+                            const available = !product.outOfStock && qtyInStock > 0;
+                            const isSelected = selectedSize === row.br;
+                            return (
+                              <tr
+                                key={row.br}
+                                className={
+                                  isSelected
+                                    ? 'bg-emerald-50/80'
+                                    : available
+                                      ? 'hover:bg-stone-50'
+                                      : 'opacity-55'
+                                }
+                              >
+                                <td className="px-4 py-2.5 font-mono-num font-bold text-[#111111]">
+                                  {row.br}
+                                </td>
+                                <td className="px-4 py-2.5 font-mono-num font-semibold text-[#C8102E]">
+                                  {row.cm} cm
+                                </td>
+                                <td className="px-4 py-2.5 font-mono-num text-stone-600">
+                                  {row.us}
+                                </td>
+                                <td className="px-4 py-2.5 text-right">
+                                  {available ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedSize(row.br);
+                                        setSizeError(false);
+                                        setJustAdded(false);
+                                        setSizeGuideOpen(false);
+                                      }}
+                                      className="px-2.5 py-1 bg-[#111111] hover:bg-[#C8102E] text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                                    >
+                                      {isSelected ? 'Selecionado' : 'Selecionar'}
+                                    </button>
+                                  ) : (
+                                    <span className="text-[11px] text-stone-400">Indisponível</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* How to measure */}
+                    <div className="bg-[#FAFAFA] border border-stone-200 p-4 space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-[#111111]">
+                        Como medir seu pé em 3 passos
+                      </p>
+                      <ol className="text-xs text-stone-700 space-y-1.5 list-decimal list-inside">
+                        <li>
+                          Coloque uma folha de papel no chão encostada na parede e pise com o
+                          calcanhar encostado na parede.
+                        </li>
+                        <li>
+                          Marque com uma caneta o ponto mais distante dos dedos (geralmente o dedão)
+                          e meça com uma régua ou fita métrica em centímetros.
+                        </li>
+                        <li>
+                          Compare a medida na coluna <strong>Medida (cm)</strong> acima. Se ficar
+                          entre dois números ou preferir folga, escolha o maior.
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </motion.div>
       )}
     </AnimatePresence>

@@ -11,7 +11,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Footer } from './components/Footer';
 import { Header, type NavSectionKey } from './components/Header';
 import { HeroBanner } from './components/HeroBanner';
+import { InstagramSection } from './components/InstagramSection';
 import { ProductDetailModal } from './components/ProductDetailModal';
+import { OfflineIndicator } from './components/PWAInstallButton';
 import { auth } from './lib/firebase';
 import { DEFAULT_STORE_CONFIG, INITIAL_BRANDS } from './lib/seedData';
 import {
@@ -352,6 +354,12 @@ export function App() {
               onSelectProduct={handleSelectProduct}
               isLoading={loadingCatalog}
             />
+
+            <InstagramSection
+              storeConfig={storeConfig}
+              products={products}
+              onSelectProduct={handleSelectProduct}
+            />
           </main>
 
           <Footer
@@ -403,6 +411,8 @@ export function App() {
               </motion.button>
             )}
           </AnimatePresence>
+
+          <OfflineIndicator />
         </div>
       </ErrorBoundary>
     </MotionConfig>

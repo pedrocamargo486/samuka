@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import {
   Heart,
+  Instagram,
   Menu,
   MessageCircle,
   Search,
   ShoppingBag,
   X,
 } from 'lucide-react';
-import { buildWhatsAppUrl } from '../lib/utils';
+import { buildWhatsAppUrl, sanitizeExternalHref } from '../lib/utils';
 import type { StoreConfig } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export type NavSectionKey =
   | 'inicio'
@@ -60,6 +62,15 @@ export function Header({
     storeConfig.whatsappNumber,
     `Olá! Gostaria de falar com o atendimento da ${storeConfig.storeName || 'Samuka Tênis'}.`
   );
+  const instagramHref = sanitizeExternalHref(storeConfig.instagramUrl);
+
+  const handleInstagramScroll = () => {
+    setMobileMenuOpen(false);
+    const el = document.getElementById('secao-instagram');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   const handleNavClick = (key: NavSectionKey) => {
     setMobileMenuOpen(false);
@@ -164,6 +175,31 @@ export function Header({
             )}
           </button>
 
+          {instagramHref ? (
+            <a
+              href={instagramHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2.5 text-[#111111] hover:bg-stone-100 rounded-md transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
+              aria-label="Instagram da loja"
+              title="Instagram"
+            >
+              <Instagram className="w-[18px] h-[18px]" />
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={handleInstagramScroll}
+              className="p-2.5 text-[#111111] hover:bg-stone-100 rounded-md transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
+              aria-label="Ver seção Instagram"
+              title="Instagram"
+            >
+              <Instagram className="w-[18px] h-[18px]" />
+            </button>
+          )}
+
+          <PWAInstallButton variant="header" />
+
           {whatsappHref ? (
             <a
               href={whatsappHref}
@@ -259,17 +295,41 @@ export function Header({
               )}
             </button>
           ))}
+          {instagramHref ? (
+            <a
+              href={instagramHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-3 border border-stone-300 text-[#111111] text-sm font-semibold"
+            >
+              <Instagram className="w-4 h-4" />
+              <span>Seguir no Instagram</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={handleInstagramScroll}
+              className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-3 border border-stone-300 text-[#111111] text-sm font-semibold cursor-pointer"
+            >
+              <Instagram className="w-4 h-4" />
+              <span>Ver Instagram da Loja</span>
+            </button>
+          )}
           {whatsappHref && (
             <a
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#111111] text-white text-sm font-semibold"
+              className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#111111] text-white text-sm font-semibold"
             >
               <MessageCircle className="w-4 h-4" />
               <span>Atendimento pelo WhatsApp</span>
             </a>
           )}
+          <PWAInstallButton
+            variant="mobile"
+            onAfterClick={() => setMobileMenuOpen(false)}
+          />
         </div>
       )}
     </header>
