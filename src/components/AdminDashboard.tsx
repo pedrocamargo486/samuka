@@ -34,11 +34,13 @@ import {
   GENDER_LABELS,
   KIDS_SIZES,
   SNEAKER_TYPE_LABELS,
+  STARTER_SHOWCASE_PRODUCTS,
   STUDIO_IMAGE_PRESETS,
 } from '../lib/seedData';
 import { auth, googleProvider, PRIMARY_OWNER_EMAIL } from '../lib/firebase';
 import {
   addAdminUser,
+  clearDemoShowcaseFromFirestore,
   deleteBrand,
   deleteProduct,
   fetchAdmins,
@@ -197,6 +199,11 @@ export function AdminDashboard({
   // Admin Team Form
   const [newAdminUid, setNewAdminUid] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
+
+  // Demo Showcase Controls
+  const [seedingDemo, setSeedingDemo] = useState(false);
+  const [clearingDemo, setClearingDemo] = useState(false);
+  const [confirmClearDemo, setConfirmClearDemo] = useState(false);
 
   useEffect(() => {
     setConfigDraft(storeConfig);
@@ -820,16 +827,47 @@ export function AdminDashboard({
   };
 
   const handleSeedProducts = async () => {
+    setSeedingDemo(true);
+    setConfirmClearDemo(false);
     try {
       await seedInitialBrandsToFirestore();
-      await seedStarterShowcaseToFirestore();
+      const res = await seedStarterShowcaseToFirestore();
       await loadAdminCollections();
       await onRefreshStorefront();
-      notify('Vitrine inicial importada para o banco de dados.');
+      notify(
+        `${res.added} tênis de demonstração adicionados (total de ${res.total} no pacote demo).`
+      );
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Erro ao importar produtos.');
+    } finally {
+      setSeedingDemo(false);
     }
   };
+
+  const handleClearDemoProducts = async () => {
+    if (!confirmClearDemo) {
+      setConfirmClearDemo(true);
+      return;
+    }
+    setClearingDemo(true);
+    try {
+      const removed = await clearDemoShowcaseFromFirestore();
+      setConfirmClearDemo(false);
+      await loadAdminCollections();
+      await onRefreshStorefront();
+      notify(`${removed} tênis de demonstração removidos do catálogo.`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Erro ao remover tênis de demonstração.');
+    } finally {
+      setClearingDemo(false);
+    }
+  };
+
+  const existingProductIds = new Set(products.map((p) => p.id));
+  const demoProductsCount = products.filter((p) => p.id.startsWith('demo-')).length;
+  const missingDemoCount = STARTER_SHOWCASE_PRODUCTS.filter(
+    (p) => !existingProductIds.has(p.id)
+  ).length;
 
   const filteredAdminProducts = products.filter((p) => {
     const q = productSearch.trim().toLowerCase();
@@ -954,16 +992,65 @@ export function AdminDashboard({
                   Pesquise tênis na web para preencher automático ou cadastre manualmente.
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:flex gap-2">
-                {products.length === 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {missingDemoCount > 0 && (
                   <button
                     type="button"
+                    disabled={seedingDemo || clearingDemo}
                     onClick={handleSeedProducts}
-                    className="px-4 py-3 border border-[#111111] bg-white text-[#111111] text-xs font-bold uppercase tracking-wider hover:bg-stone-100 cursor-pointer min-h-[44px]"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 border border-[#111111] bg-white text-[#111111] text-xs font-bold uppercase tracking-wider hover:bg-stone-100 disabled:opacity-50 cursor-pointer min-h-[44px]"
                   >
-                    Importar vitrine inicial
+                    {seedingDemo ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-[#C8102E]" />
+                    )}
+                    <span>
+                      {seedingDemo
+                        ? 'Importando catálogo...'
+                        : missingDemoCount === STARTER_SHOWCASE_PRODUCTS.length
+                        ? `Importar catálogo demo (${STARTER_SHOWCASE_PRODUCTS.length} tênis)`
+                        : `Completar catálogo demo (+${missingDemoCount})`}
+                    </span>
                   </button>
                 )}
+
+                {demoProductsCount > 0 && !confirmClearDemo && (
+                  <button
+                    type="button"
+                    disabled={seedingDemo || clearingDemo}
+                    onClick={() => setConfirmClearDemo(true)}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 border border-stone-300 bg-white text-stone-700 text-xs font-bold uppercase tracking-wider hover:border-[#C8102E] hover:text-[#C8102E] disabled:opacity-50 cursor-pointer min-h-[44px]"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remover demo ({demoProductsCount})</span>
+                  </button>
+                )}
+
+                {demoProductsCount > 0 && confirmClearDemo && (
+                  <div className="inline-flex items-center gap-1.5 border border-[#C8102E] bg-red-50 px-2.5 py-1.5 min-h-[44px]">
+                    <button
+                      type="button"
+                      disabled={clearingDemo}
+                      onClick={handleClearDemoProducts}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#C8102E] text-white text-xs font-bold uppercase tracking-wider hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+                    >
+                      {clearingDemo && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      <span>
+                        {clearingDemo ? 'Removendo...' : `Confirmar (${demoProductsCount})`}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={clearingDemo}
+                      onClick={() => setConfirmClearDemo(false)}
+                      className="px-2.5 py-1.5 text-xs font-bold uppercase tracking-wider text-stone-700 hover:text-[#111111] cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={handleOpenNewProduct}

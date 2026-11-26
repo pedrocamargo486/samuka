@@ -376,7 +376,10 @@ export async function deleteProduct(productId: string): Promise<void> {
   }
 }
 
-export async function seedStarterShowcaseToFirestore(): Promise<void> {
+export async function seedStarterShowcaseToFirestore(): Promise<{
+  added: number;
+  total: number;
+}> {
   const path = 'products';
   try {
     const existingSnap = await getDocs(collection(db, 'products'));
@@ -395,6 +398,7 @@ export async function seedStarterShowcaseToFirestore(): Promise<void> {
         details: p.details,
         price: p.price,
         promoPrice: p.promoPrice,
+        costPrice: p.costPrice ?? 0,
         isPromo: p.isPromo,
         isFeatured: p.isFeatured,
         isNewRelease: p.isNewRelease,
@@ -415,8 +419,32 @@ export async function seedStarterShowcaseToFirestore(): Promise<void> {
     if (pendingOps > 0) {
       await batch.commit();
     }
+    return { added: pendingOps, total: STARTER_SHOWCASE_PRODUCTS.length };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function clearDemoShowcaseFromFirestore(): Promise<number> {
+  const path = 'products';
+  try {
+    const existingSnap = await getDocs(collection(db, 'products'));
+    const batch = writeBatch(db);
+    let deletedCount = 0;
+
+    existingSnap.docs.forEach((d) => {
+      if (d.id.startsWith('demo-')) {
+        batch.delete(doc(db, 'products', d.id));
+        deletedCount++;
+      }
+    });
+
+    if (deletedCount > 0) {
+      await batch.commit();
+    }
+    return deletedCount;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
