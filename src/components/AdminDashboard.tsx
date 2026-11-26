@@ -71,6 +71,7 @@ import type {
   SneakerType,
   StoreConfig,
 } from '../types';
+import { buildRoutePath, type AdminTab } from '../lib/routes';
 import { BrandLogo } from './BrandLogo';
 import { OrdersTab } from './OrdersTab';
 import { ProfitCalculatorTab } from './ProfitCalculatorTab';
@@ -81,18 +82,11 @@ interface AdminDashboardProps {
   isAdmin: boolean;
   authLoading: boolean;
   storeConfig: StoreConfig;
+  initialTab?: AdminTab;
+  onTabChange?: (tab: AdminTab) => void;
   onRefreshStorefront: () => Promise<void>;
   onBackToStore: () => void;
 }
-
-type AdminTab =
-  | 'produtos'
-  | 'pedidos'
-  | 'lucros'
-  | 'marcas'
-  | 'pagina_inicial'
-  | 'configuracoes'
-  | 'equipe';
 
 const MAX_PRODUCT_IMAGES = 15;
 
@@ -138,10 +132,22 @@ export function AdminDashboard({
   isAdmin,
   authLoading,
   storeConfig,
+  initialTab = 'produtos',
+  onTabChange,
   onRefreshStorefront,
   onBackToStore,
 }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<AdminTab>('produtos');
+  const [activeTab, setActiveTabState] = useState<AdminTab>(initialTab);
+
+  useEffect(() => {
+    setActiveTabState(initialTab);
+  }, [initialTab]);
+
+  const setActiveTab = (tab: AdminTab) => {
+    setActiveTabState(tab);
+    onTabChange?.(tab);
+  };
+
   const [products, setProducts] = useState<Product[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -887,11 +893,16 @@ export function AdminDashboard({
               ].map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.key;
+                const href = buildRoutePath({ kind: 'admin', tab: tab.key });
                 return (
-                  <button
+                  <a
                     key={tab.key}
-                    type="button"
-                    onClick={() => setActiveTab(tab.key)}
+                    href={href}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                      e.preventDefault();
+                      setActiveTab(tab.key);
+                    }}
                     className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[44px] ${
                       active
                         ? 'bg-[#111111] text-white'
@@ -909,7 +920,7 @@ export function AdminDashboard({
                         {tab.badge}
                       </span>
                     )}
-                  </button>
+                  </a>
                 );
               })}
             </div>

@@ -75,19 +75,23 @@ export function HeroBanner({ storeConfig, onExplore }: HeroBannerProps) {
               </motion.p>
             )}
 
-            <motion.button
-              type="button"
+            <motion.a
+              href="/todos"
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, delay: 0.24, ease: EASE_OUT }}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={onExplore}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                onExplore();
+              }}
               className="inline-flex items-center gap-3 px-7 py-4 bg-white text-[#111111] text-xs sm:text-sm font-bold tracking-[0.12em] uppercase hover:bg-[#C8102E] hover:text-white transition-colors duration-200 cursor-pointer min-h-[48px]"
             >
               <span>{storeConfig.heroCtaText || 'EXPLORAR COLEÇÃO'}</span>
               <ArrowRight className="w-4 h-4" />
-            </motion.button>
+            </motion.a>
           </div>
         </div>
       </div>

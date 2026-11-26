@@ -1,4 +1,5 @@
 import { motion } from 'motion/react';
+import { buildRoutePath, getBrandSlug } from '../lib/routes';
 import type { Brand } from '../types';
 import { BrandLogo } from './BrandLogo';
 
@@ -41,25 +42,33 @@ export function BrandCircles({
             </h2>
           </div>
 
-          {selectedBrandId !== 'todos' && (
-            <button
-              type="button"
-              onClick={() => onSelectBrand('todos')}
+          {selectedBrandId !== 'todos' ? (
+            <a
+              href="/todos"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                onSelectBrand('todos');
+              }}
               className="text-xs font-semibold uppercase tracking-wider text-[#C8102E] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
             >
               Ver todas as marcas
-            </button>
-          )}
+            </a>
+          ) : null}
         </motion.div>
 
         {/* Horizontal Scroll on Mobile, Clean Wrap Grid on Desktop */}
         <div className="flex items-start gap-4 sm:gap-5 overflow-x-auto no-scrollbar snap-x snap-mandatory py-2 lg:flex-wrap lg:justify-between">
           {brands.map((brand, index) => {
             const isSelected = selectedBrandId === brand.id;
+            const brandHref = buildRoutePath({
+              kind: 'brand',
+              brandSlug: getBrandSlug(brand),
+            });
             return (
-              <motion.button
+              <motion.a
                 key={brand.id}
-                type="button"
+                href={brandHref}
                 initial={{ opacity: 0, y: 14 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.1 }}
@@ -70,9 +79,13 @@ export function BrandCircles({
                 }}
                 whileHover={{ y: -4, scale: 1.05 }}
                 whileTap={{ scale: 0.96 }}
-                onClick={() => onSelectBrand(brand.id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  onSelectBrand(brand.id);
+                }}
                 className="group snap-start shrink-0 flex flex-col items-center gap-2.5 focus:outline-none cursor-pointer"
-                aria-pressed={isSelected}
+                aria-current={isSelected ? 'page' : undefined}
               >
                 <div
                   className={`w-20 h-20 sm:w-22 sm:h-22 rounded-full bg-white flex items-center justify-center transition-shadow duration-200 ${
@@ -92,7 +105,7 @@ export function BrandCircles({
                 >
                   {brand.name}
                 </span>
-              </motion.button>
+              </motion.a>
             );
           })}
         </div>

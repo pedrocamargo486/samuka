@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, Heart, Share2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { buildRoutePath } from '../lib/routes';
 import { GENDER_LABELS, SNEAKER_TYPE_LABELS } from '../lib/seedData';
 import { formatBRL, shareSneaker } from '../lib/utils';
 import type { Product } from '../types';
@@ -24,6 +25,17 @@ export function ProductCard({
   onSelectProduct,
 }: ProductCardProps) {
   const [copiedShare, setCopiedShare] = useState(false);
+
+  const productHref = buildRoutePath({
+    kind: 'product',
+    slug: product.slug || product.id,
+  });
+
+  const handleOpenProduct = (e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onSelectProduct(product);
+  };
 
   const hasValidPromo =
     product.isPromo && product.promoPrice > 0 && product.promoPrice < product.price;
@@ -63,9 +75,9 @@ export function ProductCard({
     >
       {/* Studio Image Container */}
       <div className="relative aspect-[4/3] w-full bg-[#F5F5F4] overflow-hidden">
-        <button
-          type="button"
-          onClick={() => onSelectProduct(product)}
+        <a
+          href={productHref}
+          onClick={handleOpenProduct}
           className="w-full h-full block text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-[#111111]"
           aria-label={`Ver detalhes de ${product.name}`}
         >
@@ -76,7 +88,7 @@ export function ProductCard({
               isSoldOut ? 'opacity-65 grayscale-[30%]' : ''
             }`}
           />
-        </button>
+        </a>
 
         {statusText && (
           <span
@@ -124,13 +136,13 @@ export function ProductCard({
         </div>
 
         <h3 className="font-display text-sm sm:text-base font-bold text-[#111111] leading-snug mb-2 line-clamp-2 min-h-[2.5rem]">
-          <button
-            type="button"
-            onClick={() => onSelectProduct(product)}
+          <a
+            href={productHref}
+            onClick={handleOpenProduct}
             className="text-left hover:underline cursor-pointer"
           >
             {product.name}
-          </button>
+          </a>
         </h3>
 
         <div className="mt-auto pt-2">
@@ -154,13 +166,13 @@ export function ProductCard({
           </div>
 
           <div className="flex items-stretch gap-1.5">
-            <button
-              type="button"
-              onClick={() => onSelectProduct(product)}
-              className="flex-1 py-2.5 px-2 sm:px-3 bg-[#111111] text-white text-[11px] sm:text-xs font-bold uppercase tracking-[0.08em] hover:bg-[#C8102E] transition-colors cursor-pointer min-h-[40px]"
+            <a
+              href={productHref}
+              onClick={handleOpenProduct}
+              className="flex-1 py-2.5 px-2 sm:px-3 bg-[#111111] text-white text-[11px] sm:text-xs font-bold uppercase tracking-[0.08em] hover:bg-[#C8102E] transition-colors cursor-pointer min-h-[40px] flex items-center justify-center text-center"
             >
               VER PRODUTO
-            </button>
+            </a>
             <button
               type="button"
               onClick={(e) => void handleQuickShare(e)}

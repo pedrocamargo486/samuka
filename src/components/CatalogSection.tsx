@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Filter, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ChevronRight, Filter, Search, SlidersHorizontal, X } from 'lucide-react';
+import {
+  buildRoutePath,
+  SNEAKER_TYPE_TO_CATEGORY_KEY,
+  type AppRoute,
+  type CategoryRouteKey,
+} from '../lib/routes';
 import {
   ALL_STANDARD_SIZES,
   GENDER_LABELS,
@@ -8,6 +14,13 @@ import {
 } from '../lib/seedData';
 import type { Brand, GenderOption, Product, ProductFilters, SneakerType } from '../types';
 import { ProductCard } from './ProductCard';
+
+export interface CatalogPageHeader {
+  breadcrumbLabel: string;
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+}
 
 interface CatalogSectionProps {
   products: Product[];
@@ -21,14 +34,20 @@ interface CatalogSectionProps {
   onToggleOnlyFavoritesMode: (val: boolean) => void;
   onToggleFavorite: (productId: string) => void;
   onSelectProduct: (product: Product) => void;
+  onNavigateRoute?: (route: AppRoute) => void;
+  pageHeader?: CatalogPageHeader;
   isLoading: boolean;
 }
 
-const VITRINE_TABS: { key: ProductFilters['vitrine']; label: string }[] = [
-  { key: 'todos', label: 'Todos os modelos' },
-  { key: 'mais_vendidos', label: 'Mais vendidos' },
-  { key: 'lancamentos', label: 'Lançamentos' },
-  { key: 'ofertas', label: 'Ofertas especiais' },
+const VITRINE_TABS: {
+  key: ProductFilters['vitrine'];
+  label: string;
+  categoryKey: CategoryRouteKey;
+}[] = [
+  { key: 'todos', label: 'Todos os modelos', categoryKey: 'todos' },
+  { key: 'mais_vendidos', label: 'Mais vendidos', categoryKey: 'mais-vendidos' },
+  { key: 'lancamentos', label: 'Lançamentos', categoryKey: 'lancamentos' },
+  { key: 'ofertas', label: 'Ofertas especiais', categoryKey: 'ofertas' },
 ];
 
 const TYPE_QUICK_CHIPS: { key: SneakerType | 'todos'; label: string }[] = [
@@ -53,6 +72,8 @@ export function CatalogSection({
   onToggleOnlyFavoritesMode,
   onToggleFavorite,
   onSelectProduct,
+  onNavigateRoute,
+  pageHeader,
   isLoading,
 }: CatalogSectionProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -158,26 +179,61 @@ export function CatalogSection({
       className="bg-white py-10 sm:py-14"
     >
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10">
+        {pageHeader && (
+          <nav
+            aria-label="Caminho de navegação"
+            className="flex items-center gap-1.5 text-xs text-stone-500 mb-4"
+          >
+            <a
+              href="/"
+              onClick={(e) => {
+                if (!onNavigateRoute || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                onNavigateRoute({ kind: 'home' });
+              }}
+              className="hover:text-[#111111] font-medium transition-colors"
+            >
+              Início
+            </a>
+            <ChevronRight className="w-3.5 h-3.5 text-stone-400" />
+            <span className="text-[#111111] font-semibold">{pageHeader.breadcrumbLabel}</span>
+          </nav>
+        )}
+
         {/* Section Heading & Top Controls */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-stone-200">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500 mb-1">
-              {onlyFavoritesMode
-                ? 'Sua seleção salva'
-                : selectedBrandName
-                  ? `Coleção exclusiva ${selectedBrandName}`
-                  : 'Vitrine Multimarcas'}
+              {pageHeader
+                ? pageHeader.eyebrow
+                : onlyFavoritesMode
+                  ? 'Sua seleção salva'
+                  : selectedBrandName
+                    ? `Coleção exclusiva ${selectedBrandName}`
+                    : 'Vitrine Multimarcas'}
             </p>
-            <h2
-              id="heading-catalogo"
-              className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-[#111111]"
-            >
-              {onlyFavoritesMode
-                ? 'MEUS FAVORITOS'
-                : selectedBrandName
-                  ? `TÊNIS ${selectedBrandName.toUpperCase()}`
-                  : 'CATÁLOGO OFICIAL'}
-            </h2>
+            {pageHeader ? (
+              <h1
+                id="heading-catalogo"
+                className="font-display text-2xl sm:text-4xl font-extrabold tracking-tight text-[#111111]"
+              >
+                {pageHeader.title}
+              </h1>
+            ) : (
+              <h2
+                id="heading-catalogo"
+                className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-[#111111]"
+              >
+                {onlyFavoritesMode
+                  ? 'MEUS FAVORITOS'
+                  : selectedBrandName
+                    ? `TÊNIS ${selectedBrandName.toUpperCase()}`
+                    : 'CATÁLOGO OFICIAL'}
+              </h2>
+            )}
+            {pageHeader?.subtitle && (
+              <p className="text-sm text-stone-600 mt-1.5 max-w-2xl">{pageHeader.subtitle}</p>
+            )}
           </div>
 
           {/* Smart Search & Filter Toggle */}
@@ -218,22 +274,31 @@ export function CatalogSection({
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 lg:pb-0">
             {VITRINE_TABS.map((tab) => {
               const active = filters.vitrine === tab.key && !onlyFavoritesMode;
+              const targetRoute: AppRoute = { kind: 'category', categoryKey: tab.categoryKey };
               return (
-                <button
+                <a
                   key={tab.key}
-                  type="button"
-                  onClick={() => {
+                  href={buildRoutePath(targetRoute)}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
                     onToggleOnlyFavoritesMode(false);
-                    onUpdateFilters({ vitrine: tab.key });
+                    if (onNavigateRoute && !pageHeader && filters.brandId === 'todos') {
+                      onUpdateFilters({ vitrine: tab.key });
+                    } else if (onNavigateRoute && pageHeader && filters.brandId === 'todos') {
+                      onNavigateRoute(targetRoute);
+                    } else {
+                      onUpdateFilters({ vitrine: tab.key });
+                    }
                   }}
-                  className={`px-4 py-2 text-xs font-bold uppercase tracking-wider whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[38px] ${
+                  className={`px-4 py-2 text-xs font-bold uppercase tracking-wider whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[38px] flex items-center ${
                     active
                       ? 'bg-[#111111] text-white'
                       : 'bg-[#F5F5F4] text-stone-700 hover:text-[#111111]'
                   }`}
                 >
                   {tab.label}
-                </button>
+                </a>
               );
             })}
           </div>
@@ -241,11 +306,23 @@ export function CatalogSection({
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 lg:pb-0">
             {TYPE_QUICK_CHIPS.map((chip) => {
               const active = filters.type === chip.key;
+              const chipRoute: AppRoute =
+                chip.key === 'todos'
+                  ? { kind: 'category', categoryKey: 'todos' }
+                  : { kind: 'category', categoryKey: SNEAKER_TYPE_TO_CATEGORY_KEY[chip.key] };
               return (
-                <button
+                <a
                   key={chip.key}
-                  type="button"
-                  onClick={() => onUpdateFilters({ type: chip.key })}
+                  href={buildRoutePath(chipRoute)}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    if (onNavigateRoute && pageHeader && filters.brandId === 'todos') {
+                      onNavigateRoute(chipRoute);
+                    } else {
+                      onUpdateFilters({ type: chip.key });
+                    }
+                  }}
                   className={`px-3 py-1.5 text-xs font-medium whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
                     active
                       ? 'border-[#111111] text-[#111111] font-semibold bg-stone-100'
@@ -253,7 +330,7 @@ export function CatalogSection({
                   }`}
                 >
                   {chip.label}
-                </button>
+                </a>
               );
             })}
           </div>

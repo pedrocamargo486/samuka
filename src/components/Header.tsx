@@ -8,6 +8,7 @@ import {
   ShoppingBag,
   X,
 } from 'lucide-react';
+import { buildRoutePath, type AppRoute } from '../lib/routes';
 import { buildWhatsAppUrl, sanitizeExternalHref } from '../lib/utils';
 import type { StoreConfig } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -34,14 +35,14 @@ interface HeaderProps {
   onOpenFavorites: () => void;
 }
 
-const NAV_ITEMS: { key: NavSectionKey; label: string }[] = [
-  { key: 'inicio', label: 'Início' },
-  { key: 'todos', label: 'Todos os tênis' },
-  { key: 'masculino', label: 'Masculino' },
-  { key: 'feminino', label: 'Feminino' },
-  { key: 'infantil', label: 'Infantil' },
-  { key: 'marcas', label: 'Marcas' },
-  { key: 'ofertas', label: 'Ofertas' },
+const NAV_ITEMS: { key: NavSectionKey; label: string; route: AppRoute }[] = [
+  { key: 'inicio', label: 'Início', route: { kind: 'home' } },
+  { key: 'todos', label: 'Todos os tênis', route: { kind: 'category', categoryKey: 'todos' } },
+  { key: 'masculino', label: 'Masculino', route: { kind: 'category', categoryKey: 'masculino' } },
+  { key: 'feminino', label: 'Feminino', route: { kind: 'category', categoryKey: 'feminino' } },
+  { key: 'infantil', label: 'Infantil', route: { kind: 'category', categoryKey: 'infantil' } },
+  { key: 'marcas', label: 'Marcas', route: { kind: 'brands' } },
+  { key: 'ofertas', label: 'Ofertas', route: { kind: 'category', categoryKey: 'ofertas' } },
 ];
 
 export function Header({
@@ -72,7 +73,9 @@ export function Header({
     }
   };
 
-  const handleNavClick = (key: NavSectionKey) => {
+  const handleNavClick = (e: React.MouseEvent, key: NavSectionKey) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
     setMobileMenuOpen(false);
     onNavigate(key);
   };
@@ -92,13 +95,13 @@ export function Header({
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleNavClick('inicio')}
+          <a
+            href="/"
+            onClick={(e) => handleNavClick(e, 'inicio')}
             className="font-display text-lg sm:text-xl font-extrabold tracking-tight text-[#111111] whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#111111]"
           >
             {storeConfig.storeName || 'SAMUKA TÊNIS'}
-          </button>
+          </a>
         </div>
 
         {/* Zone 2: Primary Navigation Links */}
@@ -109,10 +112,10 @@ export function Header({
           {NAV_ITEMS.map((item) => {
             const isActive = activeNav === item.key;
             return (
-              <button
+              <a
                 key={item.key}
-                type="button"
-                onClick={() => handleNavClick(item.key)}
+                href={buildRoutePath(item.route)}
+                onClick={(e) => handleNavClick(e, item.key)}
                 className={`relative py-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   isActive
                     ? 'text-[#111111] font-semibold'
@@ -126,7 +129,7 @@ export function Header({
                     aria-hidden="true"
                   />
                 )}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -143,9 +146,14 @@ export function Header({
             <Search className="w-[18px] h-[18px]" />
           </button>
 
-          <button
-            type="button"
-            onClick={onOpenFavorites}
+          <a
+            href="/favoritos"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              setMobileMenuOpen(false);
+              onOpenFavorites();
+            }}
             className="relative p-2.5 text-[#111111] hover:bg-stone-100 rounded-md transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
             aria-label={`Favoritos (${favoritesCount})`}
           >
@@ -159,7 +167,7 @@ export function Header({
                 {favoritesCount}
               </span>
             )}
-          </button>
+          </a>
 
           <button
             type="button"
@@ -281,10 +289,10 @@ export function Header({
             />
           </div>
           {NAV_ITEMS.map((item) => (
-            <button
+            <a
               key={item.key}
-              type="button"
-              onClick={() => handleNavClick(item.key)}
+              href={buildRoutePath(item.route)}
+              onClick={(e) => handleNavClick(e, item.key)}
               className={`w-full text-left px-3 py-3 text-sm font-medium border-b border-stone-100 last:border-b-0 flex items-center justify-between cursor-pointer ${
                 activeNav === item.key ? 'text-[#111111] font-bold' : 'text-stone-700'
               }`}
@@ -293,7 +301,7 @@ export function Header({
               {activeNav === item.key && (
                 <span className="w-1.5 h-1.5 bg-[#C8102E] rounded-full" />
               )}
-            </button>
+            </a>
           ))}
           {instagramHref ? (
             <a

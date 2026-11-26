@@ -9,9 +9,8 @@ export function formatBRL(value: number): string {
 
 export function buildProductShareUrl(product: Product): string {
   if (typeof window === 'undefined') return '';
-  const url = new URL(window.location.origin + '/');
-  url.searchParams.set('produto', product.slug || product.id);
-  return url.toString();
+  const slug = encodeURIComponent(product.slug || product.id);
+  return `${window.location.origin}/tenis/${slug}`;
 }
 
 export async function shareSneaker(

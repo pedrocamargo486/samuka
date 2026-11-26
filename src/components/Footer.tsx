@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Clock, Instagram, MapPin, MessageCircle, ShieldCheck, X } from 'lucide-react';
+import { buildRoutePath, getBrandSlug, type AppRoute } from '../lib/routes';
 import { buildWhatsAppUrl, sanitizeExternalHref } from '../lib/utils';
 import type { Brand, StoreConfig } from '../types';
 import type { NavSectionKey } from './Header';
@@ -9,6 +10,7 @@ interface FooterProps {
   brands: Brand[];
   onNavigate: (section: NavSectionKey) => void;
   onSelectBrand: (brandId: string) => void;
+  onNavigateRoute: (route: AppRoute) => void;
   onOpenAdmin: () => void;
 }
 
@@ -17,6 +19,7 @@ export function Footer({
   brands,
   onNavigate,
   onSelectBrand,
+  onNavigateRoute,
   onOpenAdmin,
 }: FooterProps) {
   const [policyModal, setPolicyModal] = useState<'trocas' | 'privacidade' | null>(null);
@@ -26,6 +29,12 @@ export function Footer({
     `Olá! Vim pelo catálogo oficial da ${storeConfig.storeName || 'Samuka Tênis'}.`
   );
   const instagramHref = sanitizeExternalHref(storeConfig.instagramUrl);
+
+  const handleLink = (e: React.MouseEvent, fn: () => void) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    fn();
+  };
 
   return (
     <footer className="bg-[#111111] text-stone-300 border-t border-stone-800">
@@ -78,28 +87,48 @@ export function Footer({
             </div>
           </div>
 
-          {/* Col 2: Navigation */}
+          {/* Col 2: Navigation & Categories */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-white mb-4">
-              Navegação
+              Navegação & Categorias
             </h3>
-            <ul className="space-y-2.5 text-sm">
+            <ul className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm">
               {[
-                { key: 'inicio' as NavSectionKey, label: 'Início' },
-                { key: 'todos' as NavSectionKey, label: 'Todos os tênis' },
-                { key: 'masculino' as NavSectionKey, label: 'Masculino' },
-                { key: 'feminino' as NavSectionKey, label: 'Feminino' },
-                { key: 'infantil' as NavSectionKey, label: 'Infantil' },
-                { key: 'ofertas' as NavSectionKey, label: 'Ofertas' },
+                { label: 'Início', href: '/', action: () => onNavigate('inicio') },
+                { label: 'Todos os tênis', href: '/todos', action: () => onNavigate('todos') },
+                { label: 'Masculino', href: '/masculino', action: () => onNavigate('masculino') },
+                { label: 'Feminino', href: '/feminino', action: () => onNavigate('feminino') },
+                { label: 'Infantil', href: '/infantil', action: () => onNavigate('infantil') },
+                { label: 'Ofertas', href: '/ofertas', action: () => onNavigate('ofertas') },
+                {
+                  label: 'Lançamentos',
+                  href: '/lancamentos',
+                  action: () => onNavigateRoute({ kind: 'category', categoryKey: 'lancamentos' }),
+                },
+                {
+                  label: 'Corrida',
+                  href: '/categoria/corrida',
+                  action: () => onNavigateRoute({ kind: 'category', categoryKey: 'corrida' }),
+                },
+                {
+                  label: 'Academia',
+                  href: '/categoria/academia',
+                  action: () => onNavigateRoute({ kind: 'category', categoryKey: 'academia' }),
+                },
+                {
+                  label: 'Casual',
+                  href: '/categoria/casual',
+                  action: () => onNavigateRoute({ kind: 'category', categoryKey: 'casual' }),
+                },
               ].map((item) => (
-                <li key={item.key}>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate(item.key)}
+                <li key={item.href}>
+                  <a
+                    href={item.href}
+                    onClick={(e) => handleLink(e, item.action)}
                     className="text-stone-400 hover:text-white transition-colors cursor-pointer"
                   >
                     {item.label}
-                  </button>
+                  </a>
                 </li>
               ))}
             </ul>
@@ -111,17 +140,23 @@ export function Footer({
               Marcas disponíveis
             </h3>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {brands.slice(0, 12).map((brand) => (
-                <li key={brand.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectBrand(brand.id)}
-                    className="text-stone-400 hover:text-white transition-colors text-left cursor-pointer"
-                  >
-                    {brand.name}
-                  </button>
-                </li>
-              ))}
+              {brands.slice(0, 12).map((brand) => {
+                const href = buildRoutePath({
+                  kind: 'brand',
+                  brandSlug: getBrandSlug(brand),
+                });
+                return (
+                  <li key={brand.id}>
+                    <a
+                      href={href}
+                      onClick={(e) => handleLink(e, () => onSelectBrand(brand.id))}
+                      className="text-stone-400 hover:text-white transition-colors text-left cursor-pointer"
+                    >
+                      {brand.name}
+                    </a>
+                  </li>
+                );
+              })}
             </ul>
           </div>
 
@@ -173,14 +208,14 @@ export function Footer({
             © {new Date().getFullYear()} {storeConfig.storeName || 'SAMUKA TÊNIS'}. Todos os
             direitos reservados.
           </p>
-          <button
-            type="button"
-            onClick={onOpenAdmin}
+          <a
+            href="/adm"
+            onClick={(e) => handleLink(e, onOpenAdmin)}
             className="inline-flex items-center gap-1.5 text-stone-600 hover:text-stone-300 transition-colors cursor-pointer"
           >
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>Área Administrativa</span>
-          </button>
+          </a>
         </div>
       </div>
 
