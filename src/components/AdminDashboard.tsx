@@ -424,7 +424,7 @@ export function AdminDashboard({
           result.name.toLowerCase().includes(b.name.toLowerCase())
       );
 
-      const initialAutoImages = (result.imageUrls || []).slice(0, 4);
+      const initialAutoImages = (result.imageUrls || []).slice(0, 8);
       const initialAutoVideos = (result.videoUrls || []).slice(0, 1);
 
       setEditingProduct((prev) => {
@@ -537,22 +537,37 @@ export function AdminDashboard({
       return;
     }
 
-    setImportingImageUrl(imageUrl);
+    // Add immediately so user never gets stuck waiting on "Importando..."
+    setEditingProduct((prev) => {
+      if (!prev) return prev;
+      if (prev.images.includes(imageUrl) || prev.images.includes(mappedUrl)) return prev;
+      if (prev.images.length >= MAX_PRODUCT_IMAGES) return prev;
+      return { ...prev, images: [...prev.images, mappedUrl].slice(0, MAX_PRODUCT_IMAGES) };
+    });
     setErrorMessage('');
-    try {
-      const storedUrl = await importRemoteImageToStore(imageUrl);
-      setImportedUrlMap((prev) => ({ ...prev, [imageUrl]: storedUrl }));
-      setEditingProduct((prev) => {
-        if (!prev) return prev;
-        if (prev.images.includes(storedUrl) || prev.images.includes(imageUrl)) return prev;
-        if (prev.images.length >= MAX_PRODUCT_IMAGES) return prev;
-        return { ...prev, images: [...prev.images, storedUrl].slice(0, MAX_PRODUCT_IMAGES) };
-      });
-      notify('Foto adicionada ao anúncio!');
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Erro ao importar foto.');
-    } finally {
-      setImportingImageUrl(null);
+    notify('Foto adicionada ao anúncio!');
+
+    // If not yet persisted internally, cache/store in background without blocking UI
+    if (!importedUrlMap[imageUrl]) {
+      setImportingImageUrl(imageUrl);
+      try {
+        const storedUrl = await importRemoteImageToStore(imageUrl);
+        setImportedUrlMap((prev) => ({ ...prev, [imageUrl]: storedUrl }));
+        if (storedUrl !== imageUrl) {
+          setEditingProduct((prev) => {
+            if (!prev) return prev;
+            const replaced = prev.images.map((img) => (img === imageUrl ? storedUrl : img));
+            return {
+              ...prev,
+              images: Array.from(new Set(replaced)).slice(0, MAX_PRODUCT_IMAGES),
+            };
+          });
+        }
+      } catch {
+        // Keep remote HTTPS URL cleanly
+      } finally {
+        setImportingImageUrl(null);
+      }
     }
   };
 
@@ -1110,6 +1125,20 @@ export function AdminDashboard({
                               );
                             })}
                           </div>
+                          {!autoImportingPhotos && (
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-200">
+                              <span className="font-mono-num text-xs text-stone-600">
+                                {editingProduct.images.length} / {MAX_PRODUCT_IMAGES} foto(s) no anúncio
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void handleImportAllFoundImages()}
+                                className="px-3.5 py-2 bg-[#111111] hover:bg-[#C8102E] text-white text-[11px] font-bold uppercase tracking-wider cursor-pointer transition-colors"
+                              >
+                                + Importar todas as encontradas
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <p className="text-xs text-stone-600">

@@ -420,6 +420,8 @@ export async function seedStarterShowcaseToFirestore(): Promise<void> {
   }
 }
 
+let storageUnavailableInSession = false;
+
 export async function uploadProductOrBrandImage(file: File): Promise<string> {
   const uid = auth.currentUser?.uid;
   if (!uid) {
@@ -428,26 +430,36 @@ export async function uploadProductOrBrandImage(file: File): Promise<string> {
 
   const safeExt = file.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
   const fileName = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
-  try {
-    const storageRef = ref(storage, fileName);
-    await uploadBytes(storageRef, file);
-    const url = await getDownloadURL(storageRef);
-    return url;
-  } catch {
-    const { mimeType, base64Data } = await compressImageToBase64(file);
-    const mediaId = `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    const path = `media/${mediaId}`;
+
+  if (!storageUnavailableInSession) {
     try {
-      await setDoc(doc(db, 'media', mediaId), {
-        mimeType,
-        base64Data,
-        uploadedBy: uid,
-        createdAt: serverTimestamp(),
-      });
-      return `firestore-media://${mediaId}`;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, path);
+      const storageRef = ref(storage, fileName);
+      await Promise.race([
+        uploadBytes(storageRef, file),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Storage timeout')), 4000)
+        ),
+      ]);
+      const url = await getDownloadURL(storageRef);
+      return url;
+    } catch {
+      storageUnavailableInSession = true;
     }
+  }
+
+  const { mimeType, base64Data } = await compressImageToBase64(file);
+  const mediaId = `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const path = `media/${mediaId}`;
+  try {
+    await setDoc(doc(db, 'media', mediaId), {
+      mimeType,
+      base64Data,
+      uploadedBy: uid,
+      createdAt: serverTimestamp(),
+    });
+    return `firestore-media://${mediaId}`;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
 
@@ -487,38 +499,40 @@ export async function importRemoteImageToStore(imageUrl: string): Promise<string
   if (!user) {
     throw new Error('Faça login como administrador para importar imagens.');
   }
-  const token = await user.getIdToken();
-  const res = await fetch('/api/fetch-image', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ url: imageUrl }),
-  });
-
-  const rawText = await res.text();
-  let payload: {
-    mimeType?: string;
-    base64Data?: string;
-    error?: string;
-  } = {};
   try {
-    payload = JSON.parse(rawText) as {
+    const token = await user.getIdToken();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6500);
+    const res = await fetch('/api/fetch-image', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ url: imageUrl }),
+    });
+    clearTimeout(timeout);
+
+    const rawText = await res.text();
+    let payload: {
       mimeType?: string;
       base64Data?: string;
       error?: string;
-    };
-  } catch {
-    return imageUrl;
-  }
-  if (!res.ok || !payload.base64Data || !payload.mimeType) {
-    // If remote download fails, still allow direct verified HTTPS URL as fallback
-    return imageUrl;
-  }
+    } = {};
+    try {
+      payload = JSON.parse(rawText) as {
+        mimeType?: string;
+        base64Data?: string;
+        error?: string;
+      };
+    } catch {
+      return imageUrl;
+    }
+    if (!res.ok || !payload.base64Data || !payload.mimeType) {
+      return imageUrl;
+    }
 
-  try {
-    // Convert downloaded bytes to File and run through standard upload/compression pipeline
     const byteChars = atob(payload.base64Data);
     const byteNumbers = new Uint8Array(byteChars.length);
     for (let i = 0; i < byteChars.length; i++) {
